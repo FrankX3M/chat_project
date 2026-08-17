@@ -1,0 +1,36 @@
+{
+  "_comment": "Пример сценария для чат-приложения: логин один раз, затем случайные действия с весами.",
+  "steps": [
+    {
+      "name": "login",
+      "once": true,
+      "method": "POST",
+      "path": "/api/login",
+      "json": { "username": "loadtest_user_{id}", "password": "test-password" },
+      "save_token": true,
+      "token_path": "access_token"
+    },
+    {
+      "name": "get_rooms",
+      "method": "GET",
+      "path": "/api/rooms",
+      "auth": true,
+      "weight": 3
+    },
+    {
+      "name": "send_message",
+      "method": "POST",
+      "path": "/api/rooms/1/messages",
+      "auth": true,
+      "json": { "text": "нагрузочное сообщение от {id}, seq={seq}" },
+      "weight": 5
+    },
+    {
+      "name": "get_history",
+      "method": "GET",
+      "path": "/api/rooms/1/messages?limit=20",
+      "auth": true,
+      "weight": 4
+    }
+  ]
+}
