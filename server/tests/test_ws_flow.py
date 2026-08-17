@@ -207,3 +207,62 @@ class TestWsFlow:
         assert alice_session.room_id is not None
         assert bob_session.status == SearchSessionStatus.MATCHED
         assert bob_session.room_id == alice_session.room_id
+
+    async def test_message_flood_is_rate_limited(
+        self, db_session, fake_redis, isolated_connection_manager, monkeypatch
+    ):
+        # Раньше `message`/`typing` не были ничем ограничены — один сокет мог
+        # заваливать партнёра/БД без лимита (см. security-скан, CWE-770).
+        monkeypatch.setattr(event_handlers.settings, "ws_message_rate_limit", 3)
+        monkeypatch.setattr(event_handlers.settings, "ws_message_rate_window_seconds", 60)
+
+        alice = await _make_user(db_session, "device-alice-flood")
+        bob = await _make_user(db_session, "device-bob-flood")
+        alice_ws, bob_ws = FakeWebSocket(), FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+        await isolated_connection_manager.connect(bob.id, bob_ws)
+
+        room = await event_handlers.room_manager.create_room(
+            db_session, user1_id=alice.id, user2_id=bob.id, topic="general"
+        )
+
+        for _ in range(3):
+            event = ClientMessageEvent(payload=ClientMessagePayload(room_id=room.id, content="hi"))
+            await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+        assert len(bob_ws.sent) == 3  # первые 3 в пределах лимита долетели
+
+        # 4-е сообщение в том же окне — отклонено, до партнёра не долетает.
+        event = ClientMessageEvent(payload=ClientMessagePayload(room_id=room.id, content="spam"))
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert len(bob_ws.sent) == 3
+        assert alice_ws.sent[-1]["event"] == "error"
+        assert alice_ws.sent[-1]["payload"]["code"] == "rate_limited"
+
+    async def test_typing_flood_is_rate_limited(
+        self, db_session, fake_redis, isolated_connection_manager, monkeypatch
+    ):
+        monkeypatch.setattr(event_handlers.settings, "ws_typing_rate_limit", 2)
+        monkeypatch.setattr(event_handlers.settings, "ws_typing_rate_window_seconds", 60)
+
+        alice = await _make_user(db_session, "device-alice-typing-flood")
+        bob = await _make_user(db_session, "device-bob-typing-flood")
+        alice_ws, bob_ws = FakeWebSocket(), FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+        await isolated_connection_manager.connect(bob.id, bob_ws)
+
+        room = await event_handlers.room_manager.create_room(
+            db_session, user1_id=alice.id, user2_id=bob.id, topic="general"
+        )
+
+        for _ in range(2):
+            event = TypingEvent(payload=TypingPayload(room_id=room.id, is_typing=True))
+            await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+        assert len(bob_ws.sent) == 2
+
+        event = TypingEvent(payload=TypingPayload(room_id=room.id, is_typing=True))
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert len(bob_ws.sent) == 2
+        assert alice_ws.sent[-1]["event"] == "error"
+        assert alice_ws.sent[-1]["payload"]["code"] == "rate_limited"

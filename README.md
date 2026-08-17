@@ -42,6 +42,8 @@ test-client.html    отладочный клиент с сырым WS-лого�
 - `POST /api/v1/search/{start,cancel}`, `GET /api/v1/search/status` — постановка в очередь (Redis) с учётом темы/пола/возраста, rate limit на `/search/start`.
 - `GET /api/v1/rooms/{id}/messages`, `POST /api/v1/rooms/{id}/leave`.
 - `WS /ws/connect?token=...` — `join_queue`, `cancel_queue`, `message`, `typing`, `leave` → `matched`, `message`, `typing`, `partner_left`, `queue_position`, `error`.
+  - `message`/`typing` тоже под rate limit (`WS_MESSAGE_RATE_LIMIT`/`WS_TYPING_RATE_LIMIT`, по умолчанию 20/30 в 10с на пользователя) — иначе один сокет мог заваливать партнёра и бесконтрольно писать строки в `messages` (см. "Security-сканы" ниже).
+  - `flirt18` (тема "Флирт 18+") нельзя запросить ни через REST `/search/start`, ни через WS `join_queue` без `is_age_verified=true` — тема из запроса больше не считается доверенной сама по себе (age-gate проверяется на сервере, а не только в `PUT /settings`).
 - Фоновый цикл матчинга (`matchmaking_loop`) ищет совместимые пары в очереди (тема + пол + возрастные диапазоны) и создаёт `chat_rooms`.
 - Реконнект: при разрыве сокета — grace-period `ROOM_RECONNECT_GRACE_SECONDS` (по умолчанию 20с), затем `end_reason=timeout`.
 - Приватность: сырой IP никогда не сохраняется, только `ip_hash` (SHA-256 + соль).
@@ -141,6 +143,36 @@ CWE-798, CVSS 9.1). Исправлено:
   и вписать в `.env` (`JWT_SECRET=...`, `IP_HASH_SALT=...`), затем перезапустить
   контейнер `server`.
 
+## Security-сканы: если снова видите "hardcoded JWT secret"
+
+Автоматические сканеры (в т.ч. статические) иногда продолжают репортить
+"Hardcoded default JWT secret" даже после фикса выше — потому что строка
+`change-me-in-production` физически всё ещё есть в репозитории (в
+`app/config.py` как константа-приманка для валидации и в комментариях
+`.env.example`/README). Это ожидаемо и не значит, что уязвимость вернулась:
+в текущем коде эта строка нигде не является дефолтным секретом и не
+используется для подписи токенов — она только сравнивается с тем, что
+пользователь мог явно вписать в `.env`, и если совпадает — приложение
+отказывается стартовать (см. `_resolve_secret` в `app/config.py`).
+
+Прежде чем считать находку актуальной, проверьте:
+
+1. `docker compose exec server python3 -c "from app.config import get_settings; print(len(get_settings().jwt_secret))"` —
+   если приложение вообще запустилось и это вывело число (а не упало на старте),
+   значит секрет либо сгенерирован случайно, либо задан вами явно — не
+   `change-me-in-production` (с ним процесс не поднимется).
+2. `grep -R "JWT_SECRET" .env` (реальный `.env`, не `.env.example`) — там не
+   должно быть буквально `change-me-in-production`.
+3. Что в `~/chat/anon-chat` (или куда вы распаковали архив) действительно
+   лежит актуальная версия — если скан гонялся против старой распаковки без
+   этого фикса, обновите код (см. "Обновить только код после правок" выше) и
+   пересоберите `server`.
+
+Если после всех трёх пунктов сканер всё ещё считает это критической
+уязвимостью — это, как правило, ложное срабатывание (сканер не понимает
+раннее завершение при недопустимом значении), можно репортить это авторам
+сканера как false positive, а не как незакрытую находку в этом проекте.
+
 ## Локальный запуск без Docker (для разработки бэкенда)
 
 ```bash
@@ -176,9 +208,9 @@ cd server
 pytest -v
 ```
 
-19 тестов проходят без поднятия реального Postgres/Redis (SQLite in-memory +
-fakeredis, реальный ASGI-стек FastAPI для `/settings` и `/stats/online`), 1 skip
-(жалобы — вне текущей версии).
+31 тест проходит без поднятия реального Postgres/Redis (SQLite in-memory +
+fakeredis, реальный ASGI-стек FastAPI для `/settings`, `/search`, `/rooms` и
+`/stats/online`), 1 skip (жалобы — вне текущей версии).
 
 ## Следующие шаги (по CLAUDE.md)
 

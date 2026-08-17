@@ -22,6 +22,7 @@ from app.matchmaking.matcher import find_match
 from app.matchmaking.topics import requires_age_verification
 from app.models.chat_room import ChatRoom, EndReason
 from app.models.user import User
+from app.moderation.rate_limiter import RateLimitExceeded, check_rate_limit
 from app.schemas.ws_events import (
     CancelQueueEvent,
     ClientEvent,
@@ -72,9 +73,9 @@ async def dispatch_event(
         await queue_repo.dequeue(redis, user.id)
         await session_tracker.mark_cancelled(db, user.id)
     elif isinstance(event, ClientMessageEvent):
-        await _handle_message(user, event, db)
+        await _handle_message(user, event, db, redis)
     elif isinstance(event, TypingEvent):
-        await _handle_typing(user, event, db)
+        await _handle_typing(user, event, db, redis)
     elif isinstance(event, LeaveEvent):
         await _handle_leave(user, event, db, reason=EndReason.USER_LEFT)
     else:  # pragma: no cover - защита от расширения union без обработчика
@@ -121,7 +122,33 @@ async def _get_room_or_error(db: AsyncSession, user: User, room_id: uuid.UUID) -
     return room
 
 
-async def _handle_message(user: User, event: ClientMessageEvent, db: AsyncSession) -> None:
+async def _check_ws_rate_limit(
+    redis: Redis, user: User, *, bucket: str, limit: int, window_seconds: int
+) -> bool:
+    """Тот же fixed-window rate limit, что и на REST /search/start, но для
+    WS `message`/`typing` — раньше сокет мог слать оба события без всяких
+    ограничений (см. security-скан: unthrottled WS handlers, CWE-770).
+    Возвращает False и шлёт `error`, если лимит превышен."""
+    try:
+        await check_rate_limit(
+            redis, bucket=bucket, key=str(user.id), limit=limit, window_seconds=window_seconds
+        )
+    except RateLimitExceeded:
+        await _send_error(user.id, "rate_limited", f"too many {bucket} events, slow down")
+        return False
+    return True
+
+
+async def _handle_message(user: User, event: ClientMessageEvent, db: AsyncSession, redis: Redis) -> None:
+    if not await _check_ws_rate_limit(
+        redis,
+        user,
+        bucket="ws_message",
+        limit=settings.ws_message_rate_limit,
+        window_seconds=settings.ws_message_rate_window_seconds,
+    ):
+        return
+
     room = await _get_room_or_error(db, user, event.payload.room_id)
     if room is None:
         return
@@ -151,7 +178,16 @@ async def _handle_message(user: User, event: ClientMessageEvent, db: AsyncSessio
     )
 
 
-async def _handle_typing(user: User, event: TypingEvent, db: AsyncSession) -> None:
+async def _handle_typing(user: User, event: TypingEvent, db: AsyncSession, redis: Redis) -> None:
+    if not await _check_ws_rate_limit(
+        redis,
+        user,
+        bucket="ws_typing",
+        limit=settings.ws_typing_rate_limit,
+        window_seconds=settings.ws_typing_rate_window_seconds,
+    ):
+        return
+
     room = await _get_room_or_error(db, user, event.payload.room_id)
     if room is None:
         return

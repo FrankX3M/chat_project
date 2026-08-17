@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     search_start_rate_limit: int = 10
     search_start_rate_window_seconds: int = 60
 
+    # WS message/typing — та же защита от флуда, что и на /search/start,
+    # но раньше её не было вообще: один сокет мог слать message/typing без
+    # ограничений, заваливая партнёра и бесконтрольно плодя строки в messages
+    # (content_filter — заглушка, ничего не отсеивает). См. security-скан:
+    # "Unthrottled WebSocket message/typing handlers", CWE-770, CVSS 6.5.
+    ws_message_rate_limit: int = 20
+    ws_message_rate_window_seconds: int = 10
+    ws_typing_rate_limit: int = 30
+    ws_typing_rate_window_seconds: int = 10
+
     environment: str = "local"
 
     @field_validator("jwt_secret", "ip_hash_salt")

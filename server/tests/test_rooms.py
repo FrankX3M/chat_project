@@ -5,7 +5,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.deps import get_current_user, get_redis_dep
+from app.api.deps import get_redis_dep
 from app.core.security import create_access_token
 from app.chat import room_manager
 from app.db.session import get_db
