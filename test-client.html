@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Анонимный чат — тестовый клиент</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f2330;
+    --border: #2a2f3d;
+    --text: #e6e8ec;
+    --text-dim: #8b90a0;
+    --accent: #5b8def;
+    --accent-2: #3fb97a;
+    --danger: #e5534b;
+    --warn: #d9a441;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .app {
+    width: 100%;
+    max-width: 560px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  header {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dim);
+    display: inline-block;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .dot.online { background: var(--accent-2); }
+  .dot.err { background: var(--danger); }
+  .status-line { font-size: 12px; color: var(--text-dim); }
+
+  .section { padding: 18px 20px; border-bottom: 1px solid var(--border); }
+  .section:last-child { border-bottom: none; }
+  label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  input[type=text] {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
+  button.danger { background: var(--danger); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  .mt { margin-top: 10px; }
+
+  #chatState { font-size: 12px; color: var(--text-dim); min-height: 16px; }
+
+  #messages {
+    height: 320px;
+    overflow-y: auto;
+    padding: 14px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #101319;
+  }
+  .msg {
+    max-width: 78%;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    line-height: 1.4;
+    word-wrap: break-word;
+  }
+  .msg.me { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 3px; }
+  .msg.partner { align-self: flex-start; background: var(--panel-2); border-bottom-left-radius: 3px; }
+  .msg.system { align-self: center; background: transparent; color: var(--text-dim); font-size: 12px; }
+  .typing-indicator { align-self: flex-start; font-size: 12px; color: var(--text-dim); font-style: italic; min-height: 16px; }
+
+  .composer { display: flex; gap: 8px; padding: 14px 20px; }
+  .composer input { flex: 1; }
+
+  .hidden { display: none !important; }
+  .log { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-dim); max-height: 100px; overflow-y: auto; margin-top: 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1><span class="dot" id="connDot"></span>Анонимный чат — тестовый клиент</h1>
+    <span class="status-line" id="userLabel"></span>
+  </header>
+
+  <div class="section" id="setupSection">
+    <label>Адрес API (без завершающего слэша), например http://192.168.0.233:8000</label>
+    <input type="text" id="apiBase" value="http://192.168.0.233:8000" />
+
+    <div class="row mt">
+      <div>
+        <label>device_id (у каждого "пользователя"/вкладки — свой)</label>
+        <input type="text" id="deviceId" />
+      </div>
+    </div>
+
+    <div class="mt">
+      <button id="loginBtn">Войти анонимно</button>
+      <button id="randomizeBtn" class="secondary" style="margin-left:8px;">Сгенерировать device_id</button>
+    </div>
+    <div class="status-line mt" id="setupStatus"></div>
+  </div>
+
+  <div class="section hidden" id="searchSection">
+    <div id="chatState">Не в поиске</div>
+    <div class="row mt">
+      <button id="startSearchBtn">Найти собеседника</button>
+      <button id="cancelSearchBtn" class="secondary">Отменить поиск</button>
+    </div>
+  </div>
+
+  <div class="hidden" id="chatSection">
+    <div class="status-line" style="padding: 10px 20px 0;" id="roomLabel"></div>
+    <div id="messages"></div>
+    <div class="typing-indicator hidden" id="typingIndicator" style="padding: 0 20px;">собеседник печатает…</div>
+    <div class="composer">
+      <input type="text" id="messageInput" placeholder="Сообщение…" />
+      <button id="sendBtn">Отправить</button>
+      <button id="leaveBtn" class="danger">Стоп</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const els = {
+  connDot: $('connDot'), userLabel: $('userLabel'),
+  apiBase: $('apiBase'), deviceId: $('deviceId'),
+  loginBtn: $('loginBtn'), randomizeBtn: $('randomizeBtn'), setupStatus: $('setupStatus'),
+  setupSection: $('setupSection'), searchSection: $('searchSection'), chatSection: $('chatSection'),
+  chatState: $('chatState'), startSearchBtn: $('startSearchBtn'), cancelSearchBtn: $('cancelSearchBtn'),
+  roomLabel: $('roomLabel'), messages: $('messages'), typingIndicator: $('typingIndicator'),
+  messageInput: $('messageInput'), sendBtn: $('sendBtn'), leaveBtn: $('leaveBtn'),
+  log: $('log'),
+};
+
+let state = {
+  apiBase: '', accessToken: null, userId: null,
+  ws: null, roomId: null, typingTimeout: null, lastTypingSent: 0,
+};
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  els.log.textContent += `[${t}] ${msg}\n`;
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+function randomDeviceId() {
+  return 'dev-' + Math.random().toString(36).slice(2, 10);
+}
+els.deviceId.value = randomDeviceId();
+els.randomizeBtn.onclick = () => { els.deviceId.value = randomDeviceId(); };
+
+function addMessage(text, cls) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.textContent = text;
+  els.messages.appendChild(div);
+  els.messages.scrollTop = els.messages.scrollHeight;
+}
+
+function setConnDot(cls) {
+  els.connDot.className = 'dot ' + (cls || '');
+}
+
+// ---- Авторизация ----
+els.loginBtn.onclick = async () => {
+  const base = els.apiBase.value.replace(/\/$/, '');
+  const deviceId = els.deviceId.value.trim();
+  if (!deviceId) { els.setupStatus.textContent = 'Укажите device_id'; return; }
+
+  els.setupStatus.textContent = 'Входим…';
+  try {
+    const resp = await fetch(`${base}/api/v1/auth/anonymous`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId }),
+    });
+    if (!resp.ok) throw new Error(`auth ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json();
+
+    state.apiBase = base;
+    state.accessToken = data.access_token;
+    state.userId = data.user_id;
+
+    els.userLabel.textContent = `${deviceId} (${data.user_id.slice(0, 8)}…)`;
+    els.setupStatus.textContent = 'Успешно';
+    log(`Авторизован как ${deviceId}, user_id=${data.user_id}`);
+
+    connectWs(base, data.access_token);
+    els.searchSection.classList.remove('hidden');
+  } catch (e) {
+    els.setupStatus.textContent = 'Ошибка: ' + e.message;
+    log('Ошибка авторизации: ' + e.message);
+  }
+};
+
+// ---- WebSocket ----
+function connectWs(base, token) {
+  const wsScheme = base.startsWith('https') ? 'wss' : 'ws';
+  const wsBase = base.replace(/^https?/, wsScheme);
+  const ws = new WebSocket(`${wsBase}/ws/connect?token=${encodeURIComponent(token)}`);
+  state.ws = ws;
+
+  ws.onopen = () => { setConnDot('online'); log('WS подключён'); };
+  ws.onclose = () => { setConnDot('err'); log('WS отключён'); };
+  ws.onerror = () => { setConnDot('err'); log('WS ошибка'); };
+
+  ws.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    log('← ' + JSON.stringify(data));
+    handleServerEvent(data);
+  };
+}
+
+function sendWs(event, payload) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    log('WS не подключён, событие не отправлено: ' + event);
+    return;
+  }
+  const msg = { event, payload: payload || {} };
+  state.ws.send(JSON.stringify(msg));
+  log('→ ' + JSON.stringify(msg));
+}
+
+function handleServerEvent(data) {
+  switch (data.event) {
+    case 'queue_position':
+      els.chatState.textContent = `В очереди, позиция: ${data.payload.position}`;
+      break;
+    case 'matched':
+      state.roomId = data.payload.room_id;
+      els.searchSection.classList.add('hidden');
+      els.chatSection.classList.remove('hidden');
+      els.messages.innerHTML = '';
+      els.roomLabel.textContent = `Комната ${data.payload.room_id.slice(0, 8)}… · собеседник: ${data.payload.partner.gender}`;
+      addMessage('Собеседник найден', 'system');
+      break;
+    case 'message':
+      addMessage(data.payload.content, 'partner');
+      break;
+    case 'typing':
+      els.typingIndicator.classList.toggle('hidden', !data.payload.is_typing);
+      break;
+    case 'partner_left':
+      addMessage(`Собеседник вышел (${data.payload.reason})`, 'system');
+      resetToSearch();
+      break;
+    case 'error':
+      addMessage(`Ошибка: ${data.payload.message}`, 'system');
+      break;
+  }
+}
+
+function resetToSearch() {
+  state.roomId = null;
+  els.chatSection.classList.add('hidden');
+  els.searchSection.classList.remove('hidden');
+  els.chatState.textContent = 'Не в поиске';
+}
+
+// ---- Поиск ----
+async function apiCall(path, opts) {
+  const resp = await fetch(`${state.apiBase}${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${state.accessToken}`,
+      ...(opts && opts.headers),
+    },
+  });
+  if (!resp.ok) throw new Error(`${path} ${resp.status}: ${await resp.text()}`);
+  return resp.status === 204 ? null : resp.json();
+}
+
+els.startSearchBtn.onclick = async () => {
+  try {
+    els.chatState.textContent = 'Ищём собеседника…';
+    const data = await apiCall('/api/v1/search/start', { method: 'POST', body: JSON.stringify({}) });
+    log('search/start → ' + JSON.stringify(data));
+  } catch (e) {
+    els.chatState.textContent = 'Ошибка поиска';
+    log('Ошибка search/start: ' + e.message);
+  }
+};
+
+els.cancelSearchBtn.onclick = async () => {
+  try {
+    await apiCall('/api/v1/search/cancel', { method: 'POST' });
+    els.chatState.textContent = 'Поиск отменён';
+  } catch (e) {
+    log('Ошибка search/cancel: ' + e.message);
+  }
+};
+
+// ---- Чат ----
+els.sendBtn.onclick = () => sendMessage();
+els.messageInput.onkeydown = (e) => { if (e.key === 'Enter') sendMessage(); };
+
+function sendMessage() {
+  const content = els.messageInput.value.trim();
+  if (!content || !state.roomId) return;
+  sendWs('message', { room_id: state.roomId, content });
+  addMessage(content, 'me');
+  els.messageInput.value = '';
+}
+
+els.messageInput.oninput = () => {
+  if (!state.roomId) return;
+  const now = Date.now();
+  if (now - state.lastTypingSent > 1200) {
+    sendWs('typing', { room_id: state.roomId, is_typing: true });
+    state.lastTypingSent = now;
+  }
+  clearTimeout(state.typingTimeout);
+  state.typingTimeout = setTimeout(() => {
+    sendWs('typing', { room_id: state.roomId, is_typing: false });
+  }, 1500);
+};
+
+els.leaveBtn.onclick = () => {
+  if (!state.roomId) return;
+  sendWs('leave', { room_id: state.roomId });
+  resetToSearch();
+};
+</script>
+</body>
+</html>

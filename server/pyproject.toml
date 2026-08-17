@@ -1,0 +1,42 @@
+[project]
+name = "anon-chat-server"
+version = "0.1.0"
+description = "Анонимный чат-сервис (Omegle-style) — FastAPI backend, MVP: поиск + чат"
+# Код совместим с 3.11+ (StrEnum, X | None и т.д. — всё доступно с 3.11).
+# CLAUDE.md рекомендует 3.12+ для продакшена, но 3.11 достаточно для разработки/MVP.
+requires-python = ">=3.11"
+# Версии закреплены (==), чтобы pip не уходил в многоминутный backtracking при
+# разрешении зависимостей (в частности redis/python-multipart/pytest-asyncio
+# конфликтовали по диапазонам с fakeredis/starlette при "рыхлых" >= ограничениях).
+# Обновлять осознанно, одним pip-компайлом сразу всех пакетов.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.3",
+    "sqlalchemy[asyncio]==2.0.52",
+    "asyncpg==0.31.0",
+    "alembic==1.19.1",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "redis==8.1.0",
+    "python-jose[cryptography]==3.5.0",
+    "python-multipart==0.0.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "httpx==0.28.1",
+    "aiosqlite==0.22.1",
+    "fakeredis==2.37.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: anon_chat
+      POSTGRES_PASSWORD: anon_chat
+      POSTGRES_DB: anon_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anon_chat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    env_file:
+      - ../server/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://anon_chat:anon_chat@postgres:5432/anon_chat
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      # - "443:443"  # раскомментировать при переезде на VPS с TLS (см. nginx.conf)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../clients/web:/usr/share/nginx/html:ro
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:
