@@ -17,3 +17,7 @@ venv/
 # Editors
 .vscode/
 .idea/
+
+# Load test reports
+scripts/load-test/loadtest_report/
+scripts/load-test/report-*/

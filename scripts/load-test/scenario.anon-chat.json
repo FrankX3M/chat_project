@@ -1,0 +1,28 @@
+{
+  "_comment": "Сценарий под этот проект: анонимный логин -> постановка в очередь поиска -> проверка статистики. Подходит для оценки нагрузки на /api/v1/*.",
+  "steps": [
+    {
+      "name": "anonymous_login",
+      "once": true,
+      "method": "POST",
+      "path": "/api/v1/auth/anonymous",
+      "json": { "device_id": "loadtest-{id}" },
+      "save_token": true,
+      "token_path": "access_token"
+    },
+    {
+      "name": "start_search",
+      "method": "POST",
+      "path": "/api/v1/search/start",
+      "auth": true,
+      "json": { "topic": "general" },
+      "weight": 5
+    },
+    {
+      "name": "health",
+      "method": "GET",
+      "path": "/health",
+      "weight": 1
+    }
+  ]
+}
