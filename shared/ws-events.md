@@ -12,11 +12,20 @@
 
 | event | payload | Когда отправляется |
 |---|---|---|
-| `join_queue` | `{ topic?, partner_gender?, partner_age_min?, partner_age_max?, plot_role? }` | Альтернатива `POST /search/start` — постановка в очередь прямо по сокету |
+| `join_queue` | `{ topic?, partner_gender?, partner_age_min?, partner_age_max?, partner_age_ranges?, plot_role? }` | Альтернатива `POST /search/start` — постановка в очередь прямо по сокету |
 | `cancel_queue` | `{}` | Отмена поиска |
 | `message` | `{ room_id, content, content_type, captcha_token? }` | Отправка сообщения в чате |
 | `typing` | `{ room_id, is_typing }` | Индикатор набора текста (throttle на клиенте, не чаще раза в 1-2 сек) |
 | `leave` | `{ room_id }` | "Стоп" / "Далее" |
+
+`partner_age_ranges` (`[{ min, max }, ...]`) — task190826_v2: во вкладках "Общение" и
+"Флирт 18+" возраст собеседника — множественный выбор (минимум один диапазон на клиенте).
+Матчинг считает партнёра подходящим, если его возраст попадает в ЛЮБОЙ из присланных
+диапазонов (см. `matchmaking/filters.py::_age_ok`). Легаси-поля `partner_age_min`/
+`partner_age_max` остаются как одиночный диапазон для обратной совместимости и как
+запасной вариант, если `partner_age_ranges` не передан; когда оба присутствуют,
+приоритет — у `partner_age_ranges`. Для темы "Ролка" (`roleplay`) сервер игнорирует все
+три поля — тема без фильтра по возрасту.
 
 `plot_role` (`seeking_plot` \| `offering_plot`) — task190826: обязателен только для темы
 "Ролка" (`roleplay`), проверяется на сервере (`matchmaking/topics.py::validate_topic_selection`).

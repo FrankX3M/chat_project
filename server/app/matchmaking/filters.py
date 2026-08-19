@@ -10,10 +10,23 @@ def _gender_ok(my_pref: str, other_gender: str) -> bool:
     return my_pref == Gender.UNSPECIFIED.value or my_pref == other_gender
 
 
-def _age_ok(age_min: int | None, age_max: int | None, other_age: int | None) -> bool:
+def _age_ok(
+    age_min: int | None,
+    age_max: int | None,
+    other_age: int | None,
+    age_ranges: list[tuple[int, int]] | None = None,
+) -> bool:
+    """task190826_v2: если заданы несколько диапазонов возраста собеседника
+    (множественный выбор чипов в "Общение"/"Флирт", минимум один) —
+    достаточно попадания в ЛЮБОЙ из них. `age_min`/`age_max` остаются как
+    легаси-фолбэк для записей без `age_ranges` (старые записи в очереди,
+    несовместимые клиенты) — см. matchmaking/queue.py::QueueEntry.
+    """
     if other_age is None:
         # Возраст не указан — не блокируем матч на этом основании.
         return True
+    if age_ranges:
+        return any(lo <= other_age <= hi for lo, hi in age_ranges)
     if age_min is not None and other_age < age_min:
         return False
     if age_max is not None and other_age > age_max:
@@ -58,9 +71,13 @@ def is_mutually_compatible(a: dict[str, Any], b: dict[str, Any]) -> bool:
     if not _gender_ok(b["partner_gender"], a["gender"]):
         return False
 
-    if not _age_ok(a["partner_age_min"], a["partner_age_max"], b["age"]):
+    if not _age_ok(
+        a["partner_age_min"], a["partner_age_max"], b["age"], a.get("partner_age_ranges")
+    ):
         return False
-    if not _age_ok(b["partner_age_min"], b["partner_age_max"], a["age"]):
+    if not _age_ok(
+        b["partner_age_min"], b["partner_age_max"], a["age"], b.get("partner_age_ranges")
+    ):
         return False
 
     if not _plot_role_ok(a["topic"], a.get("plot_role"), b.get("plot_role")):

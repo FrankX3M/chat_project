@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import json
 import logging
 import uuid
 
@@ -115,8 +116,10 @@ async def _handle_join_queue(user: User, event: JoinQueueEvent, redis: Redis) ->
     if await queue_repo.is_queued(redis, user.id):
         return
 
-    partner_age_min = None if excludes_age_filter(payload.topic) else payload.partner_age_min
-    partner_age_max = None if excludes_age_filter(payload.topic) else payload.partner_age_max
+    age_excluded = excludes_age_filter(payload.topic)
+    partner_age_min = None if age_excluded else payload.partner_age_min
+    partner_age_max = None if age_excluded else payload.partner_age_max
+    partner_age_ranges = [] if age_excluded else payload.partner_age_ranges
 
     entry = queue_repo.QueueEntry(
         user_id=str(user.id),
@@ -126,6 +129,11 @@ async def _handle_join_queue(user: User, event: JoinQueueEvent, redis: Redis) ->
         partner_gender=payload.partner_gender.value,
         partner_age_min=str(partner_age_min) if partner_age_min else "",
         partner_age_max=str(partner_age_max) if partner_age_max else "",
+        partner_age_ranges=(
+            json.dumps([[r.min, r.max] for r in partner_age_ranges])
+            if partner_age_ranges
+            else ""
+        ),
         plot_role=payload.plot_role.value if payload.plot_role else "",
         joined_at=queue_repo.now_ts(),
     )

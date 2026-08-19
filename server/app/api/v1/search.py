@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,8 +82,10 @@ async def start_search(
 
     # task190826: "Ролка" — вкладка без возраста, игнорируем присланные
     # границы вместо того, чтобы полагаться на клиента, что он их не пришлёт.
-    partner_age_min = None if excludes_age_filter(body.topic) else body.partner_age_min
-    partner_age_max = None if excludes_age_filter(body.topic) else body.partner_age_max
+    age_excluded = excludes_age_filter(body.topic)
+    partner_age_min = None if age_excluded else body.partner_age_min
+    partner_age_max = None if age_excluded else body.partner_age_max
+    partner_age_ranges = [] if age_excluded else body.partner_age_ranges
 
     entry = queue_repo.QueueEntry(
         user_id=str(user.id),
@@ -91,6 +95,11 @@ async def start_search(
         partner_gender=body.partner_gender.value,
         partner_age_min=str(partner_age_min) if partner_age_min is not None else "",
         partner_age_max=str(partner_age_max) if partner_age_max is not None else "",
+        partner_age_ranges=(
+            json.dumps([[r.min, r.max] for r in partner_age_ranges])
+            if partner_age_ranges
+            else ""
+        ),
         plot_role=body.plot_role.value if body.plot_role else "",
         joined_at=queue_repo.now_ts(),
     )

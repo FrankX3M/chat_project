@@ -89,6 +89,7 @@
   .pill.selected { background: var(--accent); color: white; }
   .pill.disabled { opacity: 0.35; cursor: not-allowed; }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .hint { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
   @media (max-width: 520px) {
     .two-col { grid-template-columns: 1fr; }
   }
@@ -146,6 +147,11 @@
     padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border);
     font-size: 13px; color: var(--text-dim);
   }
+  .report-btn {
+    width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(229, 83, 75, 0.12); color: var(--danger); border: none;
+  }
+  .report-btn:hover { background: rgba(229, 83, 75, 0.22); filter: none; }
   #messages {
     height: 380px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px;
@@ -267,6 +273,7 @@
       <div class="group">
         <div class="group-title">Возраст собеседника:</div>
         <div class="pills stacked" id="partnerAgePills"></div>
+        <div class="hint">Можно выбрать несколько — минимум один вариант</div>
       </div>
     </div>
 
@@ -291,6 +298,10 @@
   <div id="chatCard" class="card hidden">
     <div class="chat-header">
       <span id="chatRoomLabel">Собеседник найден</span>
+      <!-- task190826_v2: кнопка-красный треугольник ("Пожаловаться"). -->
+      <button class="btn ghost report-btn" id="reportBtn" type="button" title="Пожаловаться" aria-label="Пожаловаться">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 3 22 20 2 20 Z" fill="currentColor"/></svg>
+      </button>
     </div>
     <div id="messages"></div>
     <div class="typing-indicator hidden" id="typingIndicator">собеседник печатает…</div>
@@ -307,8 +318,12 @@
       <button class="btn primary send-btn" id="sendBtn">Отправить</button>
     </div>
     <div class="btn-row">
-      <button class="btn primary" id="nextBtn">Далее</button>
-      <button class="btn danger" id="stopBtn">Стоп</button>
+      <!-- task190826_v2: "Далее" -> "Завершить чат", "Стоп" -> "Настроить
+           параметры". Обработчики (см. els.nextBtn.onclick / els.stopBtn.onclick
+           ниже) не меняются — меняются только подписи и то, что клик по
+           "Завершить чат" теперь сначала открывает подтверждение. -->
+      <button class="btn primary" id="nextBtn">Завершить чат</button>
+      <button class="btn danger" id="stopBtn">Настроить параметры</button>
     </div>
   </div>
 
@@ -322,6 +337,20 @@
     <div class="modal-actions">
       <button class="btn ghost" id="rulesCancelBtn">Отмена</button>
       <button class="btn primary" id="rulesAcceptBtn">Я согласен, начать</button>
+    </div>
+  </div>
+</div>
+
+<!-- task190826_v2: переиспользуемое окно-предупреждение — используется и для
+     "Завершить чат и Пожаловаться?" (красный треугольник), и для
+     "У вас открыт активный чат... точно завершить?" (кнопка "Завершить чат"). -->
+<div id="confirmModal" class="modal-overlay hidden">
+  <div class="modal-card" style="max-width:380px;">
+    <div class="modal-title" id="confirmModalTitle"></div>
+    <div class="modal-body" id="confirmModalBody"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="confirmModalCancelBtn">Отменить</button>
+      <button class="btn primary" id="confirmModalConfirmBtn">Подтвердить</button>
     </div>
   </div>
 </div>
@@ -387,6 +416,20 @@
   function requiresOppositeGender(topic) { return OPPOSITE_GENDER_TOPICS.has(topic); }
   function excludesAge(topic) { return NO_AGE_TOPICS.has(topic); }
   function requiresPlotRole(topic) { return PLOT_ROLE_TOPICS.has(topic); }
+
+  // task190826_v2: "Возраст собеседника" — множественный выбор (минимум
+  // один диапазон). На "Флирт 18+" выбирать можно только совершеннолетние
+  // диапазоны (та же логика, что раньше делала бакеты disabled).
+  function availableAgeBuckets(topic) {
+    return topic === 'flirt18' ? AGE_BUCKETS.filter((b) => b.adult) : AGE_BUCKETS;
+  }
+  function defaultAgeKeysForTopic(topic) {
+    // По умолчанию выбираем все доступные для темы диапазоны — это
+    // эквивалент прежнего поведения "фильтр не задан" (могло совпасть с
+    // партнёром любого возраста), но теперь как явный набор чипов, а не
+    // null, потому что пустой выбор больше не допускается.
+    return availableAgeBuckets(topic).map((b) => b.key);
+  }
   function oppositeGender(gender) {
     if (gender === 'male') return 'female';
     if (gender === 'female') return 'male';
@@ -467,11 +510,15 @@
     searchingTitle: $('searchingTitle'), searchingSub: $('searchingSub'), cancelSearchBtn: $('cancelSearchBtn'),
     chatRoomLabel: $('chatRoomLabel'), messages: $('messages'), typingIndicator: $('typingIndicator'),
     messageInput: $('messageInput'), sendBtn: $('sendBtn'), nextBtn: $('nextBtn'), stopBtn: $('stopBtn'),
+    reportBtn: $('reportBtn'),
     onlineNote: $('onlineNote'),
     emojiBtn: $('emojiBtn'), emojiPanel: $('emojiPanel'),
     captchaWrap: $('captchaWrap'), captchaWidget: $('captchaWidget'),
     rulesModal: $('rulesModal'), rulesModalTitle: $('rulesModalTitle'), rulesModalBody: $('rulesModalBody'),
     rulesCancelBtn: $('rulesCancelBtn'), rulesAcceptBtn: $('rulesAcceptBtn'),
+    confirmModal: $('confirmModal'), confirmModalTitle: $('confirmModalTitle'),
+    confirmModalBody: $('confirmModalBody'), confirmModalCancelBtn: $('confirmModalCancelBtn'),
+    confirmModalConfirmBtn: $('confirmModalConfirmBtn'),
   };
 
   let form = {
@@ -480,7 +527,9 @@
     partnerGender: 'unspecified',
     plotRole: null,
     ownAgeKey: null,
-    partnerAgeKey: null,
+    // task190826_v2: массив вместо одиночного ключа — множественный выбор,
+    // минимум один элемент, пока тема не excludesAge().
+    partnerAgeKeys: [],
     theme: 'dark',
   };
 
@@ -517,6 +566,24 @@
     });
   }
 
+  // task190826_v2: та же вёрстка пилюль, но множественный выбор (несколько
+  // "selected" одновременно) — используется для возраста собеседника.
+  function renderMultiPillGroup(container, options, selectedKeys, onToggle, opts) {
+    opts = opts || {};
+    container.innerHTML = '';
+    options.forEach((opt) => {
+      const btn = document.createElement('div');
+      const isDisabled = opts.isDisabled ? opts.isDisabled(opt) : false;
+      const isSelected = selectedKeys.indexOf(opt.key) !== -1;
+      btn.className = 'pill' + (isSelected ? ' selected' : '') + (isDisabled ? ' disabled' : '');
+      btn.setAttribute('role', 'checkbox');
+      btn.setAttribute('aria-checked', String(isSelected));
+      btn.textContent = opt.label;
+      btn.onclick = () => { if (!isDisabled) onToggle(opt.key); };
+      container.appendChild(btn);
+    });
+  }
+
   function renderAll() {
     const oppositeRequired = requiresOppositeGender(form.topic);
     const ageExcluded = excludesAge(form.topic);
@@ -527,10 +594,12 @@
       const prevTopic = form.topic;
       form.topic = key;
 
-      // task190826: "Флирт"/"Ролка" — только противоположный пол. Если свой
-      // пол ещё не задан (или уже не тот, что нужен) — не подставляем
-      // случайное значение, оставляем невалидным до явного выбора.
+      // task190826_v2: "Неважно" больше не показывается как вариант на
+      // "Флирт"/"Ролка" (см. ownGenderOptions выше) — если свой пол на
+      // момент переключения темы был "unspecified", подставляем "male" по
+      // умолчанию, иначе выбор своего пола молча остаётся невидимым/пустым.
       if (requiresOppositeGender(key)) {
+        if (form.ownGender === 'unspecified') form.ownGender = 'male';
         const opp = oppositeGender(form.ownGender);
         if (opp) form.partnerGender = opp;
       } else if (prevTopic !== key && requiresOppositeGender(prevTopic)) {
@@ -541,13 +610,28 @@
         // Вкладка "Флирт" — только возраст от 18 лет, других пилюль нет.
         const ownBucket = bucketByKey(form.ownAgeKey);
         if (ownBucket && !ownBucket.adult) form.ownAgeKey = null;
-        const partnerBucket = bucketByKey(form.partnerAgeKey);
-        if (partnerBucket && !partnerBucket.adult) form.partnerAgeKey = null;
       }
 
+      // task190826_v2: множественный выбор возраста собеседника.
       if (excludesAge(key)) {
         form.ownAgeKey = null;
-        form.partnerAgeKey = null;
+        form.partnerAgeKeys = [];
+      } else {
+        if (key === 'flirt18') {
+          // Не-совершеннолетние диапазоны больше недоступны на "Флирт" —
+          // снимаем их из уже выбранного набора, а не оставляем висеть.
+          form.partnerAgeKeys = form.partnerAgeKeys.filter((k) => {
+            const b = bucketByKey(k);
+            return b ? b.adult : false;
+          });
+        }
+        // Минимум один диапазон должен быть выбран всегда, пока секция
+        // видима — если после переключения темы список опустел (первый
+        // заход, либо пришли из "Ролки", либо все выбранные стали
+        // недоступны на "Флирт"), подставляем разумный дефолт.
+        if (form.partnerAgeKeys.length === 0) {
+          form.partnerAgeKeys = defaultAgeKeysForTopic(key);
+        }
       }
 
       if (!requiresPlotRole(key)) {
@@ -557,20 +641,26 @@
       renderAll();
     });
 
-    renderPillGroup(els.ownGenderPills, OWN_GENDERS, form.ownGender, (key) => {
+    // task190826_v2: на "Флирт"/"Ролка" пол "Неважно"/"Не важно" убирается из
+    // списка вариантов совсем (а не просто становится disabled, как было
+    // раньше) — и для своего пола, и для пола собеседника.
+    const ownGenderOptions = oppositeRequired
+      ? OWN_GENDERS.filter((g) => g.key !== 'unspecified')
+      : OWN_GENDERS;
+    const partnerGenderOptions = oppositeRequired
+      ? PARTNER_GENDERS.filter((g) => g.key !== 'unspecified')
+      : PARTNER_GENDERS;
+
+    renderPillGroup(els.ownGenderPills, ownGenderOptions, form.ownGender, (key) => {
       form.ownGender = key;
       if (requiresOppositeGender(form.topic)) {
         const opp = oppositeGender(key);
         form.partnerGender = opp || 'unspecified';
       }
       renderAll();
-    }, {
-      // На "Флирт"/"Ролка" нельзя оставить свой пол неопределённым — иначе
-      // невозможно вычислить противоположный.
-      isDisabled: (opt) => oppositeRequired && opt.key === 'unspecified',
     });
 
-    renderPillGroup(els.partnerGenderPills, PARTNER_GENDERS, form.partnerGender, (key) => {
+    renderPillGroup(els.partnerGenderPills, partnerGenderOptions, form.partnerGender, (key) => {
       form.partnerGender = key;
       renderAll();
     }, {
@@ -590,7 +680,18 @@
       renderPillGroup(els.ownAgePills, AGE_BUCKETS, form.ownAgeKey, (key) => { form.ownAgeKey = key; renderAll(); }, {
         isDisabled: (b) => form.topic === 'flirt18' && !b.adult,
       });
-      renderPillGroup(els.partnerAgePills, AGE_BUCKETS, form.partnerAgeKey, (key) => { form.partnerAgeKey = key; renderAll(); }, {
+      // task190826_v2: возраст собеседника — множественный выбор, минимум
+      // один диапазон (нельзя снять последний оставшийся чип).
+      renderMultiPillGroup(els.partnerAgePills, AGE_BUCKETS, form.partnerAgeKeys, (key) => {
+        const isSelected = form.partnerAgeKeys.indexOf(key) !== -1;
+        if (isSelected) {
+          if (form.partnerAgeKeys.length === 1) return;
+          form.partnerAgeKeys = form.partnerAgeKeys.filter((k) => k !== key);
+        } else {
+          form.partnerAgeKeys = form.partnerAgeKeys.concat([key]);
+        }
+        renderAll();
+      }, {
         isDisabled: (b) => form.topic === 'flirt18' && !b.adult,
       });
     }
@@ -615,6 +716,13 @@
 
     if (requiresPlotRole(form.topic) && !form.plotRole) {
       return 'Выберите критерий: "Ищу сюжет" или "Предлагаю сюжет"';
+    }
+
+    // task190826_v2: защитная проверка — UI не даёт снять последний чип
+    // возраста, но на всякий случай (например, сохранённое состояние из
+    // localStorage/старой версии) не даём стартовать поиск с пустым набором.
+    if (!excludesAge(form.topic) && form.partnerAgeKeys.length === 0) {
+      return 'Выберите хотя бы один возрастной диапазон собеседника';
     }
 
     return null;
@@ -680,9 +788,17 @@
       form.topic = settings.preferred_topic || 'general';
       const ownBucket = settings.age != null ? bucketByAge(settings.age) : null;
       form.ownAgeKey = ownBucket ? ownBucket.key : null;
-      const partnerBucket = (settings.preferred_age_min != null && settings.preferred_age_max != null)
-        ? bucketByRange(settings.preferred_age_min, settings.preferred_age_max) : null;
-      form.partnerAgeKey = partnerBucket ? partnerBucket.key : null;
+      // task190826_v2: сервер пока хранит в /settings только легаси-пару
+      // preferred_age_min/max (одна вкладка) — при загрузке превращаем её в
+      // массив из одного элемента; если сохранённой пары нет (первый визит),
+      // подставляем дефолт "выбрано всё доступное" вместо пустого массива.
+      if (excludesAge(form.topic)) {
+        form.partnerAgeKeys = [];
+      } else {
+        const partnerBucket = (settings.preferred_age_min != null && settings.preferred_age_max != null)
+          ? bucketByRange(settings.preferred_age_min, settings.preferred_age_max) : null;
+        form.partnerAgeKeys = partnerBucket ? [partnerBucket.key] : defaultAgeKeysForTopic(form.topic);
+      }
 
       // task190826: публичная конфигурация (сейчас — только reCAPTCHA site key).
       // Не критично для остального UI — если запрос упал, просто считаем
@@ -797,12 +913,24 @@
   // ---------------------------------------------------------------------
   function currentSearchPayload() {
     const ageExcluded = excludesAge(form.topic);
-    const partnerBucket = (!ageExcluded && form.partnerAgeKey) ? bucketByKey(form.partnerAgeKey) : null;
+    const partnerBuckets = ageExcluded
+      ? []
+      : form.partnerAgeKeys.map(bucketByKey).filter(Boolean);
+    // task190826_v2: несколько диапазонов — актуальный источник правды для
+    // матчинга, см. server/app/matchmaking/filters.py::_age_ok.
+    const partnerAgeRanges = partnerBuckets.map((b) => ({ min: b.min, max: b.max }));
+    // Легаси-границы: общий охват выбранных диапазонов. Отправляются вместе
+    // с partner_age_ranges ради обратной совместимости (PUT /settings и
+    // старые/несовместимые клиенты) — сервер при наличии ranges использует
+    // их, а не этот приближённый охват.
+    const legacyMin = partnerBuckets.length ? Math.min.apply(null, partnerBuckets.map((b) => b.min)) : null;
+    const legacyMax = partnerBuckets.length ? Math.max.apply(null, partnerBuckets.map((b) => b.max)) : null;
     return {
       topic: form.topic,
       partner_gender: form.partnerGender,
-      partner_age_min: partnerBucket ? partnerBucket.min : null,
-      partner_age_max: partnerBucket ? partnerBucket.max : null,
+      partner_age_min: legacyMin,
+      partner_age_max: legacyMax,
+      partner_age_ranges: partnerAgeRanges,
       plot_role: requiresPlotRole(form.topic) ? form.plotRole : null,
     };
   }
@@ -864,6 +992,28 @@
     els.rulesModal.classList.add('hidden');
   }
 
+  // ---------------------------------------------------------------------
+  // task190826_v2: переиспользуемое окно-предупреждение (задачи 5 и 6).
+  // ---------------------------------------------------------------------
+  function openConfirmModal(opts) {
+    els.confirmModalTitle.textContent = opts.title;
+    els.confirmModalBody.innerHTML = opts.bodyHtml;
+    els.confirmModalCancelBtn.textContent = opts.cancelLabel || 'Отменить';
+    els.confirmModalConfirmBtn.textContent = opts.confirmLabel || 'Подтвердить';
+    els.confirmModalConfirmBtn.className = 'btn ' + (opts.confirmClass || 'primary');
+    els.confirmModalConfirmBtn.onclick = () => {
+      closeConfirmModal();
+      opts.onConfirm();
+    };
+    els.confirmModal.classList.remove('hidden');
+  }
+
+  function closeConfirmModal() {
+    els.confirmModal.classList.add('hidden');
+  }
+
+  els.confirmModalCancelBtn.onclick = closeConfirmModal;
+
   els.startChatBtn.onclick = () => {
     const error = validateForm();
     if (error) {
@@ -909,14 +1059,21 @@
     typingState.timeout = setTimeout(() => sendWs('typing', { room_id: session.roomId, is_typing: false }), 1500);
   };
 
-  els.stopBtn.onclick = () => {
+  // task190826_v2: тело кнопки "Стоп" (теперь подписана "Настроить
+  // параметры") не изменилось — просто leave и назад к настройкам. Также
+  // переиспользуется MVP-обработчиком жалобы (задача 5, см. reportBtn ниже).
+  function leaveAndShowSettings() {
     if (session.roomId) sendWs('leave', { room_id: session.roomId });
     session.roomId = null;
     hideCaptchaWidget();
     showScreen('settings');
-  };
+  }
+  els.stopBtn.onclick = leaveAndShowSettings;
 
-  els.nextBtn.onclick = async () => {
+  // task190826_v2: тело кнопки "Далее" (теперь подписана "Завершить чат") —
+  // функционал не менялся, просто вынесено в функцию, чтобы вызывать её
+  // после подтверждения в модалке (задача 6), а не прямо по клику.
+  async function proceedToNextSearch() {
     if (session.roomId) sendWs('leave', { room_id: session.roomId });
     session.roomId = null;
     hideCaptchaWidget();
@@ -928,6 +1085,32 @@
     } catch (e) {
       showScreen('settings');
     }
+  }
+
+  els.nextBtn.onclick = () => {
+    openConfirmModal({
+      title: 'У вас открыт активный чат',
+      bodyHtml: '<p>Точно ли хотите завершить текущий чат?</p>',
+      cancelLabel: 'Нет',
+      confirmLabel: 'Да',
+      confirmClass: 'primary',
+      onConfirm: proceedToNextSearch,
+    });
+  };
+
+  // task190826_v2 (задача 5): кнопка-красный треугольник — подтверждение
+  // "Завершить чат и Пожаловаться?". В рамках MVP чат просто завершается
+  // (переиспользуем leaveAndShowSettings), без отдельного вызова
+  // POST /reports — см. CHANGES_task190826_v2.md.
+  els.reportBtn.onclick = () => {
+    openConfirmModal({
+      title: 'Завершить чат и Пожаловаться?',
+      bodyHtml: '<p>Вы уверены, что хотите <b>завершить чат и пожаловаться</b> на собеседника?</p>',
+      cancelLabel: 'Отменить',
+      confirmLabel: 'Завершить',
+      confirmClass: 'danger',
+      onConfirm: leaveAndShowSettings,
+    });
   };
 
   // ---------------------------------------------------------------------
@@ -949,7 +1132,10 @@
     const cursor = start + emoji.length;
     input.focus();
     if (input.setSelectionRange) input.setSelectionRange(cursor, cursor);
-    els.emojiPanel.classList.add('hidden');
+    // task190826_v2: раньше здесь скрывалась панель после каждого выбора —
+    // теперь она остаётся открытой, чтобы можно было добавить несколько
+    // смайликов подряд. Закрывается явно: клик вне панели (см. обработчик
+    // document click ниже) или повторный клик по emojiBtn.
   }
 
   els.emojiBtn.onclick = (e) => {

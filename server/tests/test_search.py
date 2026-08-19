@@ -2,6 +2,8 @@
 статуса SearchSession (см. код-ревью: age-gate bypass, stale SearchSession).
 """
 
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -147,6 +149,63 @@ class TestSearchTopicConstraints:
         assert entry_hash["partner_age_min"] == ""
         assert entry_hash["partner_age_max"] == ""
         assert entry_hash["plot_role"] == "seeking_plot"
+
+
+@pytest.mark.asyncio
+class TestSearchPartnerAgeRanges:
+    """task190826_v2: множественный выбор диапазонов возраста собеседника
+    ("Общение"/"Флирт" — минимум один диапазон на клиенте)."""
+
+    async def test_multiple_ranges_stored_as_json_in_queue_entry(
+        self, db_session, api_client, fake_redis
+    ):
+        user, token = await _create_user_and_token(db_session, "dev-search-8")
+        headers = {"Authorization": f"Bearer {token}"}
+        async with api_client as client:
+            resp = await client.post(
+                "/api/v1/search/start",
+                headers=headers,
+                json={
+                    "topic": "general",
+                    "partner_age_ranges": [{"min": 18, "max": 21}, {"min": 36, "max": 99}],
+                },
+            )
+        assert resp.status_code == 201
+
+        entry_hash = await fake_redis.hgetall(f"queue:entry:{user.id}")
+        assert json.loads(entry_hash["partner_age_ranges"]) == [[18, 21], [36, 99]]
+
+    async def test_roleplay_ignores_partner_age_ranges_too(
+        self, db_session, api_client, fake_redis
+    ):
+        user, token = await _create_user_and_token(db_session, "dev-search-9", gender="male")
+        headers = {"Authorization": f"Bearer {token}"}
+        async with api_client as client:
+            resp = await client.post(
+                "/api/v1/search/start",
+                headers=headers,
+                json={
+                    "topic": "roleplay",
+                    "partner_gender": "female",
+                    "plot_role": "seeking_plot",
+                    "partner_age_ranges": [{"min": 18, "max": 21}],
+                },
+            )
+        assert resp.status_code == 201
+
+        entry_hash = await fake_redis.hgetall(f"queue:entry:{user.id}")
+        assert entry_hash["partner_age_ranges"] == ""
+
+    async def test_min_greater_than_max_rejected(self, db_session, api_client, fake_redis):
+        _, token = await _create_user_and_token(db_session, "dev-search-10")
+        headers = {"Authorization": f"Bearer {token}"}
+        async with api_client as client:
+            resp = await client.post(
+                "/api/v1/search/start",
+                headers=headers,
+                json={"topic": "general", "partner_age_ranges": [{"min": 30, "max": 20}]},
+            )
+        assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

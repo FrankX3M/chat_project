@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.models.message import ContentType
 from app.models.user import Gender, PlotRole
+from app.schemas.search import AgeRange
 
 
 class ClientEventType(StrEnum):
@@ -43,6 +44,11 @@ class JoinQueuePayload(BaseModel):
     # позволяло через WS прислать, например, partner_age_min=-500 (см. код-ревью).
     partner_age_min: int | None = Field(default=None, ge=13, le=120)
     partner_age_max: int | None = Field(default=None, ge=13, le=120)
+    # task190826_v2: тот же множественный выбор диапазонов возраста
+    # собеседника, что и в SearchStartRequest.partner_age_ranges — WS
+    # join_queue дублирует REST /search/start как альтернативная точка входа,
+    # оба должны принимать одинаковый payload (см. CLAUDE.md п.2).
+    partner_age_ranges: list[AgeRange] = Field(default_factory=list)
     # task190826: тот же критерий, что и в SearchStartRequest.plot_role — WS
     # join_queue дублирует REST /search/start как альтернативная точка входа.
     plot_role: PlotRole | None = None

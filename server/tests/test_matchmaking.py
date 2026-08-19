@@ -6,7 +6,8 @@ from app.matchmaking.matcher import find_match
 
 
 def _entry(user_id, topic="", gender="unspecified", age="", partner_gender="unspecified",
-           partner_age_min="", partner_age_max="", plot_role="", joined_at=None) -> queue_repo.QueueEntry:
+           partner_age_min="", partner_age_max="", partner_age_ranges="", plot_role="",
+           joined_at=None) -> queue_repo.QueueEntry:
     return queue_repo.QueueEntry(
         user_id=user_id,
         topic=topic,
@@ -15,6 +16,7 @@ def _entry(user_id, topic="", gender="unspecified", age="", partner_gender="unsp
         partner_gender=partner_gender,
         partner_age_min=partner_age_min,
         partner_age_max=partner_age_max,
+        partner_age_ranges=partner_age_ranges,
         plot_role=plot_role,
         joined_at=joined_at if joined_at is not None else queue_repo.now_ts(),
     )
@@ -49,6 +51,46 @@ class TestFilters:
     def test_age_unspecified_does_not_block(self):
         a = _entry("a", partner_age_min="20", partner_age_max="30").as_filter_dict()
         b = _entry("b", age="").as_filter_dict()
+        assert is_mutually_compatible(a, b)
+
+    # --- task190826_v2: множественный выбор диапазонов возраста собеседника ---
+
+    def test_age_ranges_match_when_within_any_selected_range(self):
+        # Выбраны непересекающиеся диапазоны 18-21 и 36+ ("Общение"/"Флирт" —
+        # мультиселект чипов); партнёру 40 лет — попадает во второй диапазон.
+        a = _entry("a", partner_age_ranges='[[18, 21], [36, 99]]').as_filter_dict()
+        b = _entry("b", age="40").as_filter_dict()
+        assert is_mutually_compatible(a, b)
+
+    def test_age_ranges_reject_when_in_the_gap_between_ranges(self):
+        # 27 лет не попадает ни в 18-21, ни в 36-99 — диапазоны не сплошные,
+        # это не то же самое, что один диапазон 18-99.
+        a = _entry("a", partner_age_ranges='[[18, 21], [36, 99]]').as_filter_dict()
+        b = _entry("b", age="27").as_filter_dict()
+        assert not is_mutually_compatible(a, b)
+
+    def test_age_ranges_take_priority_over_legacy_min_max(self):
+        # Если оба поля присутствуют (не должно происходить у актуального
+        # клиента, но защищаемся от рассинхрона) — только ranges считает.
+        a = _entry(
+            "a", partner_age_min="20", partner_age_max="30", partner_age_ranges='[[40, 50]]'
+        ).as_filter_dict()
+        b = _entry("b", age="45").as_filter_dict()
+        assert is_mutually_compatible(a, b)
+
+    def test_age_ranges_empty_falls_back_to_legacy_min_max(self):
+        # Старые записи в очереди (до появления partner_age_ranges) не должны
+        # начать пропускать всех подряд — легаси-фолбэк обязателен.
+        a = _entry("a", partner_age_min="20", partner_age_max="30", partner_age_ranges="").as_filter_dict()
+        b = _entry("b", age="45").as_filter_dict()
+        assert not is_mutually_compatible(a, b)
+
+    def test_age_ranges_malformed_json_does_not_crash_and_falls_back(self):
+        a = _entry(
+            "a", partner_age_min="20", partner_age_max="30", partner_age_ranges="not-json"
+        ).as_filter_dict()
+        assert a["partner_age_ranges"] == []
+        b = _entry("b", age="25").as_filter_dict()
         assert is_mutually_compatible(a, b)
 
     def test_topic_must_match_exactly_not_treated_as_wildcard(self):

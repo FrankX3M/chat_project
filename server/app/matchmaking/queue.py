@@ -9,6 +9,7 @@ MVP использует один общий sorted set (FIFO по времен�
 Состояние очереди — только в Redis, не в PostgreSQL (см. CLAUDE.md п.3).
 """
 
+import json
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -34,6 +35,12 @@ class QueueEntry:
     partner_gender: str
     partner_age_min: str
     partner_age_max: str
+    # task190826_v2: несколько непересекающихся диапазонов возраста
+    # собеседника ("Общение"/"Флирт" — множественный выбор чипов, минимум
+    # один). JSON-список пар [min, max], "" — диапазоны не заданы (тогда
+    # matchmaking/filters.py откатывается на одиночные partner_age_min/max
+    # выше, ради обратной совместимости со старыми записями в очереди).
+    partner_age_ranges: str = ""
     # task190826: критерий "ищу сюжет"/"предлагаю сюжет" для темы "Ролка"
     # (см. app.models.user.PlotRole) — "" для тем, где он не применяется.
     plot_role: str = ""
@@ -53,14 +60,21 @@ class QueueEntry:
             partner_age_min=data["partner_age_min"],
             partner_age_max=data["partner_age_max"],
             # .get с дефолтом "" — записи, поставленные в очередь до появления
-            # этого поля, не должны падать при чтении (ENTRY_TTL короткий, но
+            # этих полей, не должны падать при чтении (ENTRY_TTL короткий, но
             # на всякий случай не завязываемся на одновременный релиз клиента).
+            partner_age_ranges=data.get("partner_age_ranges", ""),
             plot_role=data.get("plot_role", ""),
             joined_at=float(data["joined_at"]),
         )
 
     def as_filter_dict(self) -> dict:
         """Плоский dict с типизированными значениями для matchmaking/filters.py."""
+        ranges: list[tuple[int, int]] = []
+        if self.partner_age_ranges:
+            try:
+                ranges = [(int(lo), int(hi)) for lo, hi in json.loads(self.partner_age_ranges)]
+            except (ValueError, TypeError):  # запись повреждена/от несовместимого клиента
+                ranges = []
         return {
             "user_id": self.user_id,
             "topic": self.topic or None,
@@ -69,6 +83,7 @@ class QueueEntry:
             "partner_gender": self.partner_gender,
             "partner_age_min": int(self.partner_age_min) if self.partner_age_min else None,
             "partner_age_max": int(self.partner_age_max) if self.partner_age_max else None,
+            "partner_age_ranges": ranges,
             "plot_role": self.plot_role or None,
         }
 
