@@ -63,6 +63,11 @@ async def _make_user(db_session, device_id: str, gender: str = "unspecified", ag
     return user
 
 
+async def _fake_verify_recaptcha_ok(token: str, *, remote_ip: str | None = None) -> bool:
+    """Заглушка для тестов — не ходит в сеть к Google."""
+    return bool(token)
+
+
 @pytest.mark.asyncio
 class TestWsFlow:
     async def test_full_flow_search_chat_leave(self, db_session, fake_redis, isolated_connection_manager):
@@ -169,17 +174,50 @@ class TestWsFlow:
     async def test_join_queue_flirt18_accepted_when_age_verified(
         self, db_session, fake_redis, isolated_connection_manager
     ):
-        alice = User(device_id="device-alice-4", age=25, is_age_verified=True)
+        # task190826: "Флирт" требует противоположный пол — alice=female, поэтому
+        # partner_gender должен быть male.
+        alice = User(device_id="device-alice-4", age=25, is_age_verified=True, gender="female")
         db_session.add(alice)
         await db_session.commit()
         await db_session.refresh(alice)
         alice_ws = FakeWebSocket()
         await isolated_connection_manager.connect(alice.id, alice_ws)
 
-        event = JoinQueueEvent(payload=JoinQueuePayload(topic="flirt18"))
+        event = JoinQueueEvent(payload=JoinQueuePayload(topic="flirt18", partner_gender="male"))
         await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
 
         assert await queue_repo.is_queued(fake_redis, alice.id)
+
+    async def test_join_queue_flirt18_rejected_when_partner_gender_not_opposite(
+        self, db_session, fake_redis, isolated_connection_manager
+    ):
+        alice = User(device_id="device-alice-3b", age=25, is_age_verified=True, gender="female")
+        db_session.add(alice)
+        await db_session.commit()
+        await db_session.refresh(alice)
+        alice_ws = FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+
+        event = JoinQueueEvent(payload=JoinQueuePayload(topic="flirt18", partner_gender="female"))
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert alice_ws.sent[-1]["event"] == "error"
+        assert alice_ws.sent[-1]["payload"]["code"] == "invalid_topic_filters"
+        assert not await queue_repo.is_queued(fake_redis, alice.id)
+
+    async def test_join_queue_roleplay_requires_plot_role(
+        self, db_session, fake_redis, isolated_connection_manager
+    ):
+        alice = await _make_user(db_session, "device-alice-roleplay", gender="male")
+        alice_ws = FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+
+        event = JoinQueueEvent(payload=JoinQueuePayload(topic="roleplay", partner_gender="female"))
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert alice_ws.sent[-1]["event"] == "error"
+        assert alice_ws.sent[-1]["payload"]["code"] == "invalid_topic_filters"
+        assert not await queue_repo.is_queued(fake_redis, alice.id)
 
     async def test_notify_match_marks_search_sessions_matched(
         self, db_session, fake_redis, isolated_connection_manager
@@ -238,6 +276,77 @@ class TestWsFlow:
         assert len(bob_ws.sent) == 3
         assert alice_ws.sent[-1]["event"] == "error"
         assert alice_ws.sent[-1]["payload"]["code"] == "rate_limited"
+
+    async def test_message_requires_captcha_when_enabled_and_threshold_not_met(
+        self, db_session, fake_redis, isolated_connection_manager, monkeypatch
+    ):
+        # task190826: пока капча включена и порог не пройден — сообщение без
+        # captcha_token отклоняется, до партнёра не долетает.
+        monkeypatch.setattr(event_handlers.settings, "recaptcha_enabled", True)
+
+        alice = await _make_user(db_session, "device-alice-captcha-1")
+        bob = await _make_user(db_session, "device-bob-captcha-1")
+        alice_ws, bob_ws = FakeWebSocket(), FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+        await isolated_connection_manager.connect(bob.id, bob_ws)
+
+        room = await event_handlers.room_manager.create_room(
+            db_session, user1_id=alice.id, user2_id=bob.id, topic="general"
+        )
+
+        event = ClientMessageEvent(payload=ClientMessagePayload(room_id=room.id, content="hi"))
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert len(bob_ws.sent) == 0
+        assert alice_ws.sent[-1]["event"] == "error"
+        assert alice_ws.sent[-1]["payload"]["code"] == "captcha_required"
+
+    async def test_message_delivered_with_valid_captcha_token(
+        self, db_session, fake_redis, isolated_connection_manager, monkeypatch
+    ):
+        monkeypatch.setattr(event_handlers.settings, "recaptcha_enabled", True)
+        monkeypatch.setattr(
+            event_handlers.captcha_service, "verify_recaptcha", _fake_verify_recaptcha_ok
+        )
+
+        alice = await _make_user(db_session, "device-alice-captcha-2")
+        bob = await _make_user(db_session, "device-bob-captcha-2")
+        alice_ws, bob_ws = FakeWebSocket(), FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+        await isolated_connection_manager.connect(bob.id, bob_ws)
+
+        room = await event_handlers.room_manager.create_room(
+            db_session, user1_id=alice.id, user2_id=bob.id, topic="general"
+        )
+
+        event = ClientMessageEvent(
+            payload=ClientMessagePayload(room_id=room.id, content="hi", captcha_token="tok")
+        )
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert len(bob_ws.sent) == 1
+        assert bob_ws.sent[-1]["event"] == "message"
+
+    async def test_message_no_captcha_needed_once_disabled(
+        self, db_session, fake_redis, isolated_connection_manager, monkeypatch
+    ):
+        # Дефолт (RECAPTCHA_ENABLED=false) — фича вне потока вообще, поведение
+        # не меняется по сравнению с тем, что было до task190826.
+        alice = await _make_user(db_session, "device-alice-captcha-3")
+        bob = await _make_user(db_session, "device-bob-captcha-3")
+        alice_ws, bob_ws = FakeWebSocket(), FakeWebSocket()
+        await isolated_connection_manager.connect(alice.id, alice_ws)
+        await isolated_connection_manager.connect(bob.id, bob_ws)
+
+        room = await event_handlers.room_manager.create_room(
+            db_session, user1_id=alice.id, user2_id=bob.id, topic="general"
+        )
+
+        event = ClientMessageEvent(payload=ClientMessagePayload(room_id=room.id, content="hi"))
+        await event_handlers.dispatch_event(alice, event, db_session, fake_redis)
+
+        assert len(bob_ws.sent) == 1
+        assert bob_ws.sent[-1]["event"] == "message"
 
     async def test_typing_flood_is_rate_limited(
         self, db_session, fake_redis, isolated_connection_manager, monkeypatch

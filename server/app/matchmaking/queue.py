@@ -34,7 +34,10 @@ class QueueEntry:
     partner_gender: str
     partner_age_min: str
     partner_age_max: str
-    joined_at: float
+    # task190826: критерий "ищу сюжет"/"предлагаю сюжет" для темы "Ролка"
+    # (см. app.models.user.PlotRole) — "" для тем, где он не применяется.
+    plot_role: str = ""
+    joined_at: float = 0.0
 
     def to_redis_hash(self) -> dict[str, str]:
         return {k: str(v) for k, v in asdict(self).items()}
@@ -49,6 +52,10 @@ class QueueEntry:
             partner_gender=data["partner_gender"],
             partner_age_min=data["partner_age_min"],
             partner_age_max=data["partner_age_max"],
+            # .get с дефолтом "" — записи, поставленные в очередь до появления
+            # этого поля, не должны падать при чтении (ENTRY_TTL короткий, но
+            # на всякий случай не завязываемся на одновременный релиз клиента).
+            plot_role=data.get("plot_role", ""),
             joined_at=float(data["joined_at"]),
         )
 
@@ -62,6 +69,7 @@ class QueueEntry:
             "partner_gender": self.partner_gender,
             "partner_age_min": int(self.partner_age_min) if self.partner_age_min else None,
             "partner_age_max": int(self.partner_age_max) if self.partner_age_max else None,
+            "plot_role": self.plot_role or None,
         }
 
 

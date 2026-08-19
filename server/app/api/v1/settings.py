@@ -32,6 +32,7 @@ def _to_response(user: User, settings_row: UserSettings) -> UserSettingsResponse
         preferred_partner_gender=settings_row.preferred_partner_gender,
         preferred_age_min=settings_row.preferred_age_min,
         preferred_age_max=settings_row.preferred_age_max,
+        preferred_plot_role=settings_row.preferred_plot_role,
         color_theme=settings_row.color_theme,
         is_18_plus_mode=settings_row.is_18_plus_mode,
     )
@@ -57,10 +58,15 @@ async def update_settings_endpoint(
     user.gender = body.gender
     user.age = body.age
 
-    # Самодекларация возраста (method=self_declaration, см. project-structure.md 3.8):
-    # если пользователь явно подтвердил "мне есть 18" и указал возраст >= 18 —
-    # засчитываем верификацию. Полноценная KYC-интеграция — отдельная задача, вне MVP.
-    if body.self_declared_adult and body.age is not None and body.age >= MIN_ADULT_AGE:
+    # Самодекларация возраста (method=self_declaration, см. project-structure.md 3.8).
+    # task190826: отдельный чекбокс "подтверждаю, что мне есть 18" убран из UI
+    # для вкладки "Флирт" — на ней теперь можно выбрать только возраст от 18 лет
+    # (остальные пилюли скрыты на клиенте), так что сам факт указания
+    # совершеннолетнего возраста уже является самодекларацией. self_declared_adult
+    # больше не проверяется — оставлено в схеме только ради обратной совместимости
+    # (см. schemas/settings.py). Это чувствительная зона продукта (CLAUDE.md п.6),
+    # изменение сделано осознанно и явно по этому конкретному запросу.
+    if body.age is not None and body.age >= MIN_ADULT_AGE:
         user.is_age_verified = True
 
     # Требует is_age_verified=true — не ослаблять эту проверку (см. CLAUDE.md п.6).
@@ -69,13 +75,14 @@ async def update_settings_endpoint(
     if body.is_18_plus_mode and not user.is_age_verified:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="18+ topic requires self_declared_adult=true and age>=18",
+            detail="18+ topic requires age>=18 (self-declared)",
         )
 
     settings_row.preferred_topic = body.preferred_topic
     settings_row.preferred_partner_gender = body.preferred_partner_gender
     settings_row.preferred_age_min = body.preferred_age_min
     settings_row.preferred_age_max = body.preferred_age_max
+    settings_row.preferred_plot_role = body.preferred_plot_role
     settings_row.color_theme = body.color_theme
     settings_row.is_18_plus_mode = body.is_18_plus_mode
 

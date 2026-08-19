@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     ws_typing_rate_limit: int = 30
     ws_typing_rate_window_seconds: int = 10
 
+    # task190826: простая антиспам-капча (Google reCAPTCHA) для первых N
+    # сообщений пользователя (см. app/moderation/captcha.py). Выключено по
+    # умолчанию — как и с jwt_secret выше, безопасный дефолт: пока оператор
+    # явно не задал реальные ключи от Google, фича просто не активна, а не
+    # притворяется работающей и не пропускает всё "как будто прошло".
+    recaptcha_enabled: bool = False
+    recaptcha_site_key: str = ""
+    recaptcha_secret_key: str = ""
+    recaptcha_message_threshold: int = 5
+
     environment: str = "local"
 
     @field_validator("jwt_secret", "ip_hash_salt")

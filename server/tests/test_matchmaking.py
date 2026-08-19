@@ -6,7 +6,7 @@ from app.matchmaking.matcher import find_match
 
 
 def _entry(user_id, topic="", gender="unspecified", age="", partner_gender="unspecified",
-           partner_age_min="", partner_age_max="", joined_at=None) -> queue_repo.QueueEntry:
+           partner_age_min="", partner_age_max="", plot_role="", joined_at=None) -> queue_repo.QueueEntry:
     return queue_repo.QueueEntry(
         user_id=user_id,
         topic=topic,
@@ -15,6 +15,7 @@ def _entry(user_id, topic="", gender="unspecified", age="", partner_gender="unsp
         partner_gender=partner_gender,
         partner_age_min=partner_age_min,
         partner_age_max=partner_age_max,
+        plot_role=plot_role,
         joined_at=joined_at if joined_at is not None else queue_repo.now_ts(),
     )
 
@@ -61,6 +62,29 @@ class TestFilters:
     def test_both_without_topic_are_compatible(self):
         a = _entry("a", topic="").as_filter_dict()
         b = _entry("b", topic="").as_filter_dict()
+        assert is_mutually_compatible(a, b)
+
+    # --- task190826: критерий "ищу/предлагаю сюжет" для темы "roleplay" ---
+
+    def test_roleplay_incompatible_when_same_plot_role(self):
+        a = _entry("a", topic="roleplay", plot_role="seeking_plot").as_filter_dict()
+        b = _entry("b", topic="roleplay", plot_role="seeking_plot").as_filter_dict()
+        assert not is_mutually_compatible(a, b)
+
+    def test_roleplay_compatible_when_complementary_plot_role(self):
+        a = _entry("a", topic="roleplay", plot_role="seeking_plot").as_filter_dict()
+        b = _entry("b", topic="roleplay", plot_role="offering_plot").as_filter_dict()
+        assert is_mutually_compatible(a, b)
+
+    def test_roleplay_incompatible_when_plot_role_missing(self):
+        a = _entry("a", topic="roleplay", plot_role="seeking_plot").as_filter_dict()
+        b = _entry("b", topic="roleplay", plot_role="").as_filter_dict()
+        assert not is_mutually_compatible(a, b)
+
+    def test_plot_role_ignored_outside_roleplay_topic(self):
+        # Одинаковый plot_role вне темы "roleplay" не должен ничего блокировать.
+        a = _entry("a", topic="general", plot_role="seeking_plot").as_filter_dict()
+        b = _entry("b", topic="general", plot_role="seeking_plot").as_filter_dict()
         assert is_mutually_compatible(a, b)
 
 

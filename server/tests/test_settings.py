@@ -63,15 +63,32 @@ class TestSettingsEndpoint:
             assert body["gender"] == "male"
             assert body["age"] == 25
             assert body["preferred_partner_gender"] == "female"
-            assert body["is_age_verified"] is False
+            # task190826: возраст >= 18 сам по себе — самодекларация совершеннолетия
+            # (отдельный чекбокс убран из UI), поэтому is_age_verified уже True.
+            assert body["is_age_verified"] is True
 
             # GET должен вернуть ровно то же, что только что сохранили.
             get_resp = await client.get("/api/v1/settings", headers=headers)
             assert get_resp.status_code == 200
             assert get_resp.json() == body
 
-    async def test_flirt18_rejected_without_self_declaration(self, db_session, api_client):
+    async def test_flirt18_rejected_when_underage(self, db_session, api_client):
+        # task190826: отдельный чекбокс "подтверждаю, что мне есть 18" убран из
+        # UI — самодекларация теперь просто "age >= 18", без self_declared_adult.
         token = await _create_user_and_token(db_session, "dev-2")
+        headers = {"Authorization": f"Bearer {token}"}
+        async with api_client as client:
+            resp = await client.put(
+                "/api/v1/settings",
+                headers=headers,
+                json={"gender": "unspecified", "age": 15, "is_18_plus_mode": True},
+            )
+        assert resp.status_code == 422
+
+    async def test_flirt18_accepted_when_age_18_or_older(self, db_session, api_client):
+        # Без self_declared_adult в теле запроса вовсе — по task190826 сам факт
+        # выбора возраста от 18 лет уже считается самодекларацией.
+        token = await _create_user_and_token(db_session, "dev-3")
         headers = {"Authorization": f"Bearer {token}"}
         async with api_client as client:
             resp = await client.put(
@@ -79,28 +96,16 @@ class TestSettingsEndpoint:
                 headers=headers,
                 json={"gender": "unspecified", "age": 25, "is_18_plus_mode": True},
             )
-        assert resp.status_code == 422
-
-    async def test_flirt18_accepted_with_self_declaration(self, db_session, api_client):
-        token = await _create_user_and_token(db_session, "dev-3")
-        headers = {"Authorization": f"Bearer {token}"}
-        async with api_client as client:
-            resp = await client.put(
-                "/api/v1/settings",
-                headers=headers,
-                json={
-                    "gender": "unspecified",
-                    "age": 25,
-                    "self_declared_adult": True,
-                    "is_18_plus_mode": True,
-                },
-            )
         assert resp.status_code == 200
         body = resp.json()
         assert body["is_age_verified"] is True
         assert body["is_18_plus_mode"] is True
 
-    async def test_flirt18_rejected_if_declared_but_underage(self, db_session, api_client):
+    async def test_flirt18_rejected_if_underage_even_with_legacy_checkbox_field(
+        self, db_session, api_client
+    ):
+        # self_declared_adult остаётся в схеме ради обратной совместимости, но
+        # больше ни на что не влияет — возраст ниже 18 всё равно отклоняется.
         token = await _create_user_and_token(db_session, "dev-4")
         headers = {"Authorization": f"Bearer {token}"}
         async with api_client as client:
@@ -115,6 +120,23 @@ class TestSettingsEndpoint:
                 },
             )
         assert resp.status_code == 422
+
+    async def test_roleplay_plot_role_preference_persists(self, db_session, api_client):
+        token = await _create_user_and_token(db_session, "dev-5")
+        headers = {"Authorization": f"Bearer {token}"}
+        async with api_client as client:
+            resp = await client.put(
+                "/api/v1/settings",
+                headers=headers,
+                json={
+                    "gender": "male",
+                    "preferred_topic": "roleplay",
+                    "preferred_partner_gender": "female",
+                    "preferred_plot_role": "seeking_plot",
+                },
+            )
+        assert resp.status_code == 200
+        assert resp.json()["preferred_plot_role"] == "seeking_plot"
 
     async def test_requires_auth(self, api_client):
         async with api_client as client:

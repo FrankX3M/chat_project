@@ -12,7 +12,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, Field
 
 from app.models.message import ContentType
-from app.models.user import Gender
+from app.models.user import Gender, PlotRole
 
 
 class ClientEventType(StrEnum):
@@ -43,6 +43,9 @@ class JoinQueuePayload(BaseModel):
     # позволяло через WS прислать, например, partner_age_min=-500 (см. код-ревью).
     partner_age_min: int | None = Field(default=None, ge=13, le=120)
     partner_age_max: int | None = Field(default=None, ge=13, le=120)
+    # task190826: тот же критерий, что и в SearchStartRequest.plot_role — WS
+    # join_queue дублирует REST /search/start как альтернативная точка входа.
+    plot_role: PlotRole | None = None
 
 
 class JoinQueueEvent(BaseModel):
@@ -59,6 +62,11 @@ class ClientMessagePayload(BaseModel):
     room_id: uuid.UUID
     content: str = Field(min_length=1, max_length=4000)
     content_type: ContentType = ContentType.TEXT
+    # task190826: простая антиспам-капча для первых N сообщений пользователя
+    # (см. app/moderation/captcha.py). Не обязателен — валидность/нужность
+    # проверяется на сервере (settings.recaptcha_enabled), клиент присылает
+    # его только когда получил ошибку `captcha_required` и решил виджет.
+    captcha_token: str | None = Field(default=None, max_length=4000)
 
 
 class ClientMessageEvent(BaseModel):

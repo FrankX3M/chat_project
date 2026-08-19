@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.user import Gender
+from app.models.user import Gender, PlotRole
 
 
 class UserSettingsResponse(BaseModel):
@@ -14,6 +14,9 @@ class UserSettingsResponse(BaseModel):
     preferred_partner_gender: Gender = Gender.UNSPECIFIED
     preferred_age_min: int | None = None
     preferred_age_max: int | None = None
+    # task190826: последний выбранный критерий "ищу/предлагаю сюжет" для темы
+    # "Ролка" — сохраняем как остальные фильтры, чтобы подставлять при повторном визите.
+    preferred_plot_role: PlotRole | None = None
     color_theme: str | None = None
     is_18_plus_mode: bool = False
 
@@ -25,7 +28,11 @@ class UserSettingsUpdate(BaseModel):
     gender: Gender = Gender.UNSPECIFIED
     age: int | None = Field(default=None, ge=13, le=120)
     # Самодекларация возраста для доступа к теме "Флирт 18+" (см. project-structure.md
-    # 3.8, method=self_declaration). Полноценная KYC-верификация — вне MVP.
+    # 3.8, method=self_declaration). По task190826 отдельный чекбокс "подтверждаю,
+    # что мне есть 18" убран из UI — поле оставлено в схеме ради обратной
+    # совместимости (старые клиенты/интеграции могут его слать), но
+    # api/v1/settings.py больше от него не зависит: возраст >= 18 сам по себе
+    # уже является self-declaration (см. комментарий там).
     self_declared_adult: bool = False
 
     # Настройки/фильтры поиска.
@@ -33,6 +40,7 @@ class UserSettingsUpdate(BaseModel):
     preferred_partner_gender: Gender = Gender.UNSPECIFIED
     preferred_age_min: int | None = Field(default=None, ge=13, le=120)
     preferred_age_max: int | None = Field(default=None, ge=13, le=120)
+    preferred_plot_role: PlotRole | None = None
     color_theme: str | None = Field(default=None, max_length=32)
     is_18_plus_mode: bool = False
 

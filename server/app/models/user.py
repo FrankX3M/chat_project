@@ -20,6 +20,18 @@ class UserStatus(StrEnum):
     SHADOW_BANNED = "shadow_banned"
 
 
+class PlotRole(StrEnum):
+    """Критерий подбора для темы "Ролка" (см. task190826): пользователь либо
+    ищет готовый сюжет, либо предлагает свой — матч допустим только между
+    комплементарными ролями (см. matchmaking/filters.py::_plot_role_ok).
+    Живёт здесь, а не в matchmaking/topics.py, по тому же принципу, что и
+    Gender: маленькие переиспользуемые enum'ы — в models, а не размазаны по
+    доменным модулям, которые на них ссылаются."""
+
+    SEEKING = "seeking_plot"
+    OFFERING = "offering_plot"
+
+
 class User(UUIDMixin, TimestampMixin, Base):
     """Анонимный пользователь — идентифицируется по устройству, без регистрации."""
 

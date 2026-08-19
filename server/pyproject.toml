@@ -20,13 +20,17 @@ dependencies = [
     "redis==8.1.0",
     "python-jose[cryptography]==3.5.0",
     "python-multipart==0.0.32",
+    # Рантайм-зависимость (не только для тестов): app/moderation/captcha.py
+    # ходит в Google siteverify API (см. task190826, RECAPTCHA_*).
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "httpx==0.28.1",
+    # httpx уже в основных зависимостях (см. выше) — используется тестовым
+    # ASGITransport-клиентом, отдельно перечислять не нужно.
     "aiosqlite==0.22.1",
     "fakeredis==2.37.0",
 ]

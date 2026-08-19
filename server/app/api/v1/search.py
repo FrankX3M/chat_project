@@ -8,7 +8,11 @@ from app.core.security import hash_ip
 from app.db.session import get_db
 from app.matchmaking import queue as queue_repo
 from app.matchmaking import session_tracker
-from app.matchmaking.topics import requires_age_verification
+from app.matchmaking.topics import (
+    excludes_age_filter,
+    requires_age_verification,
+    validate_topic_selection,
+)
 from app.models.search_session import SearchSession, SearchSessionStatus
 from app.models.user import User
 from app.moderation.rate_limiter import RateLimitExceeded, check_rate_limit
@@ -54,9 +58,30 @@ async def start_search(
             detail="this topic requires age verification — confirm via PUT /settings first",
         )
 
+    # task190826: "Флирт"/"Ролка" — только противоположный пол; "Ролка" —
+    # обязателен критерий "ищу/предлагаю сюжет" (см. matchmaking/topics.py).
+    # Тема от клиента не более доверенная, чем для age-gate выше — то же самое
+    # предупреждение из код-ревью применимо и здесь: проверяем на сервере,
+    # а не полагаемся на то, что UI не даст выбрать некорректную комбинацию.
+    validation_error = validate_topic_selection(
+        body.topic,
+        own_gender=user.gender,
+        partner_gender=body.partner_gender,
+        plot_role=body.plot_role,
+    )
+    if validation_error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=validation_error
+        )
+
     if await queue_repo.is_queued(redis, user.id):
         position = await queue_repo.get_position(redis, user.id)
         return SearchStatusResponse(status=SearchStatusValue.SEARCHING, queue_position=position)
+
+    # task190826: "Ролка" — вкладка без возраста, игнорируем присланные
+    # границы вместо того, чтобы полагаться на клиента, что он их не пришлёт.
+    partner_age_min = None if excludes_age_filter(body.topic) else body.partner_age_min
+    partner_age_max = None if excludes_age_filter(body.topic) else body.partner_age_max
 
     entry = queue_repo.QueueEntry(
         user_id=str(user.id),
@@ -64,8 +89,9 @@ async def start_search(
         gender=user.gender.value,
         age=str(user.age) if user.age is not None else "",
         partner_gender=body.partner_gender.value,
-        partner_age_min=str(body.partner_age_min) if body.partner_age_min is not None else "",
-        partner_age_max=str(body.partner_age_max) if body.partner_age_max is not None else "",
+        partner_age_min=str(partner_age_min) if partner_age_min is not None else "",
+        partner_age_max=str(partner_age_max) if partner_age_max is not None else "",
+        plot_role=body.plot_role.value if body.plot_role else "",
         joined_at=queue_repo.now_ts(),
     )
     await queue_repo.enqueue(redis, entry)

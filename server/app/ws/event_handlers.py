@@ -19,9 +19,14 @@ from app.db.session import async_session_maker
 from app.matchmaking import queue as queue_repo
 from app.matchmaking import session_tracker
 from app.matchmaking.matcher import find_match
-from app.matchmaking.topics import requires_age_verification
+from app.matchmaking.topics import (
+    excludes_age_filter,
+    requires_age_verification,
+    validate_topic_selection,
+)
 from app.models.chat_room import ChatRoom, EndReason
 from app.models.user import User
+from app.moderation import captcha as captcha_service
 from app.moderation.rate_limiter import RateLimitExceeded, check_rate_limit
 from app.schemas.ws_events import (
     CancelQueueEvent,
@@ -94,16 +99,34 @@ async def _handle_join_queue(user: User, event: JoinQueueEvent, redis: Redis) ->
             "this topic requires age verification — confirm via PUT /settings first",
         )
         return
+
+    # task190826: тот же серверный инвариант, что и в REST api/v1/search.py —
+    # WS это независимая точка входа в ту же очередь (см. комментарий выше).
+    validation_error = validate_topic_selection(
+        payload.topic,
+        own_gender=user.gender,
+        partner_gender=payload.partner_gender,
+        plot_role=payload.plot_role,
+    )
+    if validation_error:
+        await _send_error(user.id, "invalid_topic_filters", validation_error)
+        return
+
     if await queue_repo.is_queued(redis, user.id):
         return
+
+    partner_age_min = None if excludes_age_filter(payload.topic) else payload.partner_age_min
+    partner_age_max = None if excludes_age_filter(payload.topic) else payload.partner_age_max
+
     entry = queue_repo.QueueEntry(
         user_id=str(user.id),
         topic=payload.topic or "",
         gender=user.gender.value,
         age=str(user.age) if user.age is not None else "",
         partner_gender=payload.partner_gender.value,
-        partner_age_min=str(payload.partner_age_min) if payload.partner_age_min else "",
-        partner_age_max=str(payload.partner_age_max) if payload.partner_age_max else "",
+        partner_age_min=str(partner_age_min) if partner_age_min else "",
+        partner_age_max=str(partner_age_max) if partner_age_max else "",
+        plot_role=payload.plot_role.value if payload.plot_role else "",
         joined_at=queue_repo.now_ts(),
     )
     await queue_repo.enqueue(redis, entry)
@@ -148,6 +171,23 @@ async def _handle_message(user: User, event: ClientMessageEvent, db: AsyncSessio
         window_seconds=settings.ws_message_rate_window_seconds,
     ):
         return
+
+    # task190826: простая антиспам-капча для первых N сообщений пользователя
+    # (см. app/moderation/captcha.py). Выключено по умолчанию
+    # (RECAPTCHA_ENABLED=false) — не мешает существующим клиентам/тестам,
+    # пока оператор явно не задаст реальные ключи Google.
+    if settings.recaptcha_enabled:
+        remaining = await captcha_service.verifications_remaining(redis, user.id)
+        if remaining > 0:
+            token = event.payload.captcha_token
+            if not token or not await captcha_service.verify_recaptcha(token):
+                await _send_error(
+                    user.id,
+                    "captcha_required",
+                    f"solve the captcha to continue ({remaining} verification(s) left)",
+                )
+                return
+            await captcha_service.record_verified(redis, user.id)
 
     room = await _get_room_or_error(db, user, event.payload.room_id)
     if room is None:

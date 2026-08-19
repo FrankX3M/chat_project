@@ -93,15 +93,6 @@
     .two-col { grid-template-columns: 1fr; }
   }
 
-  .checkbox-row {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 13px; color: var(--text-dim);
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 20px;
-    cursor: pointer;
-  }
-  .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
-
   .cta {
     display: block;
     width: 100%;
@@ -159,6 +150,12 @@
     height: 380px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px;
     padding: 4px 2px 12px;
+    /* task190826: запрет копирования истории переписки. Это UX-барьер, а не
+       гарантия безопасности — через devtools/скриншот текст всё равно
+       доступен, но так убирается тривиальное "выделить -> copy". */
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
   }
   .msg {
     max-width: 78%; padding: 9px 13px; border-radius: 14px;
@@ -169,7 +166,7 @@
   .msg.system { align-self: center; background: transparent; color: var(--text-dim); font-size: 12px; margin: 4px 0; }
   .typing-indicator { font-size: 12px; color: var(--text-dim); font-style: italic; height: 18px; padding-left: 4px; }
 
-  .composer { display: flex; gap: 8px; margin-top: 12px; }
+  .composer { display: flex; gap: 8px; margin-top: 12px; position: relative; }
   .composer input {
     flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
     padding: 12px 14px; border-radius: 12px; font-size: 14px; outline: none;
@@ -184,6 +181,50 @@
   .btn.danger { background: var(--danger); color: white; }
   .btn:hover { filter: brightness(1.08); }
   .send-btn { padding: 12px 20px; }
+  .emoji-btn { padding: 12px 14px; font-size: 16px; line-height: 1; }
+
+  /* ---- эмодзи-пикер ---- */
+  .emoji-panel {
+    position: absolute; bottom: calc(100% + 8px); right: 0;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px; z-index: 20;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.3);
+  }
+  .emoji-panel button {
+    background: transparent; border: none; font-size: 20px; padding: 6px;
+    border-radius: 8px; cursor: pointer; line-height: 1;
+  }
+  .emoji-panel button:hover { background: var(--pill-bg); }
+
+  /* ---- капча ---- */
+  .captcha-wrap {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px; margin-top: 12px;
+  }
+  .captcha-hint { font-size: 12.5px; color: var(--text-dim); margin-bottom: 10px; text-align: center; }
+  .captcha-widget-slot { display: flex; justify-content: center; }
+
+  /* ---- модальное окно правил ---- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(6,7,10,0.62);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px; z-index: 50;
+  }
+  .modal-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 18px; padding: 26px; max-width: 520px; width: 100%;
+    max-height: 82vh; display: flex; flex-direction: column;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.4);
+  }
+  .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
+  .modal-body { overflow-y: auto; font-size: 13.5px; line-height: 1.55; color: var(--text-dim); padding-right: 4px; }
+  .modal-body p { margin: 0 0 12px; color: var(--text); }
+  .modal-body .rules-heading { font-weight: 700; color: var(--text); margin: 14px 0 6px; }
+  .modal-body ul { margin: 0; padding-left: 20px; }
+  .modal-body li { margin-bottom: 6px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .modal-actions .btn { flex: 1; }
 </style>
 </head>
 <body>
@@ -213,7 +254,12 @@
       </div>
     </div>
 
-    <div class="two-col">
+    <div class="group hidden" id="plotRoleGroup">
+      <div class="group-title">Критерий:</div>
+      <div class="pills" id="plotRolePills"></div>
+    </div>
+
+    <div class="two-col" id="ageSection">
       <div class="group">
         <div class="group-title">Ваш возраст:</div>
         <div class="pills stacked" id="ownAgePills"></div>
@@ -223,11 +269,6 @@
         <div class="pills stacked" id="partnerAgePills"></div>
       </div>
     </div>
-
-    <label class="checkbox-row hidden" id="adultCheckRow">
-      <input type="checkbox" id="adultCheck" />
-      Я подтверждаю, что мне есть 18 лет
-    </label>
 
     <div class="group">
       <div class="group-title">Цветовая схема:</div>
@@ -253,8 +294,16 @@
     </div>
     <div id="messages"></div>
     <div class="typing-indicator hidden" id="typingIndicator">собеседник печатает…</div>
+
+    <div id="captchaWrap" class="captcha-wrap hidden">
+      <div class="captcha-hint">Подтвердите, что вы не робот, чтобы отправить сообщение</div>
+      <div class="captcha-widget-slot"><div id="captchaWidget"></div></div>
+    </div>
+
     <div class="composer">
       <input type="text" id="messageInput" placeholder="Напишите сообщение…" autocomplete="off" />
+      <button class="btn ghost emoji-btn" id="emojiBtn" type="button" title="Смайлики">🙂</button>
+      <div id="emojiPanel" class="emoji-panel hidden"></div>
       <button class="btn primary send-btn" id="sendBtn">Отправить</button>
     </div>
     <div class="btn-row">
@@ -264,6 +313,17 @@
   </div>
 
   <div class="footer-note" id="onlineNote"></div>
+</div>
+
+<div id="rulesModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-title" id="rulesModalTitle">Правила чата</div>
+    <div class="modal-body" id="rulesModalBody"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="rulesCancelBtn">Отмена</button>
+      <button class="btn primary" id="rulesAcceptBtn">Я согласен, начать</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -284,8 +344,11 @@
     { key: 'flirt18', label: 'Флирт 18+' },
     { key: 'roleplay', label: 'Ролка' },
   ];
+  // task190826: "Некто" -> "Неважно". На вкладке "Общение" это единственная
+  // тема, где вообще можно выбрать неопределённый собственный пол — на
+  // "Флирт"/"Ролка" допустим только М/Ж (см. requiresOppositeGender ниже).
   const OWN_GENDERS = [
-    { key: 'unspecified', label: 'Некто' },
+    { key: 'unspecified', label: 'Неважно' },
     { key: 'male', label: 'М' },
     { key: 'female', label: 'Ж' },
   ];
@@ -293,6 +356,12 @@
     { key: 'unspecified', label: 'Не важно' },
     { key: 'male', label: 'М' },
     { key: 'female', label: 'Ж' },
+  ];
+  // task190826: критерий "ищу сюжет"/"предлагаю сюжет" для темы "Ролка".
+  // Значения — те же строки, что и app.models.user.PlotRole на сервере.
+  const PLOT_ROLES = [
+    { key: 'seeking_plot', label: 'Ищу сюжет' },
+    { key: 'offering_plot', label: 'Предлагаю сюжет' },
   ];
   const AGE_BUCKETS = [
     { key: 'u17', label: 'до 17 лет', min: 13, max: 17, adult: false },
@@ -305,35 +374,124 @@
     { key: 'light', label: 'Светлая' },
     { key: 'dark', label: 'Тёмная' },
   ];
-  const MIN_ADULT_AGE = 18;
+
+  // task190826: темы, где допустим только противоположный пол собеседника
+  // (то же самое ограничение, что сервер применяет в
+  // matchmaking/topics.py::validate_topic_selection — дублируем на клиенте
+  // только ради UX, сервер всё равно перепроверяет сам).
+  const OPPOSITE_GENDER_TOPICS = new Set(['flirt18', 'roleplay']);
+  // task190826: "Ролка" — вкладка без возраста вовсе.
+  const NO_AGE_TOPICS = new Set(['roleplay']);
+  const PLOT_ROLE_TOPICS = new Set(['roleplay']);
+
+  function requiresOppositeGender(topic) { return OPPOSITE_GENDER_TOPICS.has(topic); }
+  function excludesAge(topic) { return NO_AGE_TOPICS.has(topic); }
+  function requiresPlotRole(topic) { return PLOT_ROLE_TOPICS.has(topic); }
+  function oppositeGender(gender) {
+    if (gender === 'male') return 'female';
+    if (gender === 'female') return 'male';
+    return null;
+  }
+
+  // task190826: тексты правил, показываемые во всплывающем окне по нажатию
+  // "Начать чат" — по одному набору на тему.
+  const RULES = {
+    general: {
+      title: 'Правила чата «Общение»',
+      intro: null,
+      forbidden: [
+        'Предлагать переход в другие мессенджеры или соцсети, указывать свои контакты или ссылки.',
+        'Обсуждать или распространять информацию эротического и порнографического содержания.',
+        'Предлагать вирт, сексуальные услуги и подобные формы общения.',
+        'Рассылать спам, рекламу или повторяющиеся сообщения.',
+        'Осуществлять продажи или коммерческие предложения.',
+        'Оскорблять участников или угрожать им.',
+        'Просить деньги или материальную помощь.',
+        'Предлагать обмен личными снимками.',
+        'Просить собеседника поделиться фотографиями.',
+        'Предлагать или искать партнера для ролевой игры («Ролки»).',
+      ],
+    },
+    flirt18: {
+      title: 'Правила чата «Флирт»',
+      intro: null,
+      forbidden: [
+        'Предлагать переход в мессенджеры или социальные сети, передавать свой никнейм или ссылки на профили.',
+        'Распространять материалы эротического и порнографического содержания.',
+        'Отправлять спам, рекламу или дублирующиеся сообщения.',
+        'Продавать товары или предлагать платные услуги.',
+        'Допускать оскорбления или угрозы в адрес собеседника.',
+        'Заниматься попрошайничеством.',
+        'Предлагать обмен фотографиями.',
+        'Требовать прислать фотографии.',
+        'Предлагать или искать участие в ролевой игре («Ролке»).',
+      ],
+    },
+    roleplay: {
+      title: 'Правила чата «Ролка»',
+      intro: '«Ролка» — формат общения, в котором каждый участник выбирает персонажа и '
+        + 'описывает его поступки, совместно развивая сюжет и взаимодействие между игроками. '
+        + 'Вы можете предложить собственную сюжетную линию или присоединиться к идее '
+        + 'собеседника. Любой участник вправе корректировать направление истории по ходу '
+        + 'игры. Единственное ограничение — ваша фантазия.',
+      forbidden: [
+        'Нарушать заявленную тему разговора.',
+        'Предлагать переход в сторонние мессенджеры или соцсети, указывать свой никнейм или ссылки.',
+        'Обсуждать и распространять контент эротического или порнографического характера.',
+        'Предлагать виртуальный интим, сексуальные услуги и тому подобное.',
+        'Отправлять спам, рекламные материалы или однотипные сообщения.',
+        'Заниматься коммерческой деятельностью.',
+        'Оскорблять собеседника или высказывать угрозы.',
+        'Проявлять попрошайничество.',
+        'Предлагать обмен личными фотографиями.',
+        'Запрашивать фотографии у собеседника.',
+      ],
+    },
+  };
+
+  const EMOJIS = [
+    '😀', '😂', '🙂', '😉', '😍', '😘', '😢', '😭', '😡', '😱',
+    '👍', '👎', '🙏', '👋', '❤️', '🔥', '🎉', '🤔', '😴', '😎',
+    '🙈', '💬', '😅', '🥳', '😇', '🤗', '😏', '😜', '💔', '✨',
+  ];
 
   const $ = (id) => document.getElementById(id);
   const els = {
     loadingBanner: $('loadingBanner'), errorBanner: $('errorBanner'), retryBtn: $('retryBtn'),
     settingsCard: $('settingsCard'), searchingCard: $('searchingCard'), chatCard: $('chatCard'),
     topicPills: $('topicPills'), ownGenderPills: $('ownGenderPills'), partnerGenderPills: $('partnerGenderPills'),
-    ownAgePills: $('ownAgePills'), partnerAgePills: $('partnerAgePills'), themePills: $('themePills'),
-    adultCheckRow: $('adultCheckRow'), adultCheck: $('adultCheck'),
+    plotRoleGroup: $('plotRoleGroup'), plotRolePills: $('plotRolePills'),
+    ageSection: $('ageSection'), ownAgePills: $('ownAgePills'), partnerAgePills: $('partnerAgePills'),
+    themePills: $('themePills'),
     startChatBtn: $('startChatBtn'), validationMsg: $('validationMsg'),
     searchingTitle: $('searchingTitle'), searchingSub: $('searchingSub'), cancelSearchBtn: $('cancelSearchBtn'),
     chatRoomLabel: $('chatRoomLabel'), messages: $('messages'), typingIndicator: $('typingIndicator'),
     messageInput: $('messageInput'), sendBtn: $('sendBtn'), nextBtn: $('nextBtn'), stopBtn: $('stopBtn'),
     onlineNote: $('onlineNote'),
+    emojiBtn: $('emojiBtn'), emojiPanel: $('emojiPanel'),
+    captchaWrap: $('captchaWrap'), captchaWidget: $('captchaWidget'),
+    rulesModal: $('rulesModal'), rulesModalTitle: $('rulesModalTitle'), rulesModalBody: $('rulesModalBody'),
+    rulesCancelBtn: $('rulesCancelBtn'), rulesAcceptBtn: $('rulesAcceptBtn'),
   };
 
   let form = {
     topic: 'general',
     ownGender: 'unspecified',
     partnerGender: 'unspecified',
+    plotRole: null,
     ownAgeKey: null,
     partnerAgeKey: null,
     theme: 'dark',
-    adultChecked: false,
   };
 
-  let session = { accessToken: null, userId: null, ws: null, roomId: null, wsShouldReconnect: true };
+  let session = {
+    accessToken: null, userId: null, ws: null, roomId: null, wsShouldReconnect: true,
+    captchaConfig: null,
+  };
   let typingState = { lastSent: 0, timeout: null };
   let onlinePollTimer = null;
+  let pendingCaptchaContent = null;
+  let captchaWidgetId = null;
 
   function bucketByKey(key) { return AGE_BUCKETS.find((b) => b.key === key) || null; }
   function bucketByAge(age) { return AGE_BUCKETS.find((b) => b.min === age) || null; }
@@ -360,41 +518,105 @@
   }
 
   function renderAll() {
+    const oppositeRequired = requiresOppositeGender(form.topic);
+    const ageExcluded = excludesAge(form.topic);
+    const plotRoleRequired = requiresPlotRole(form.topic);
+    const requiredPartnerGender = oppositeRequired ? oppositeGender(form.ownGender) : null;
+
     renderPillGroup(els.topicPills, TOPICS, form.topic, (key) => {
+      const prevTopic = form.topic;
       form.topic = key;
-      if (key !== 'flirt18') { form.adultChecked = false; els.adultCheck.checked = false; }
-      if (key === 'flirt18' && form.ownAgeKey) {
-        const b = bucketByKey(form.ownAgeKey);
-        if (b && !b.adult) form.ownAgeKey = null;
+
+      // task190826: "Флирт"/"Ролка" — только противоположный пол. Если свой
+      // пол ещё не задан (или уже не тот, что нужен) — не подставляем
+      // случайное значение, оставляем невалидным до явного выбора.
+      if (requiresOppositeGender(key)) {
+        const opp = oppositeGender(form.ownGender);
+        if (opp) form.partnerGender = opp;
+      } else if (prevTopic !== key && requiresOppositeGender(prevTopic)) {
+        form.partnerGender = 'unspecified';
       }
+
+      if (key === 'flirt18') {
+        // Вкладка "Флирт" — только возраст от 18 лет, других пилюль нет.
+        const ownBucket = bucketByKey(form.ownAgeKey);
+        if (ownBucket && !ownBucket.adult) form.ownAgeKey = null;
+        const partnerBucket = bucketByKey(form.partnerAgeKey);
+        if (partnerBucket && !partnerBucket.adult) form.partnerAgeKey = null;
+      }
+
+      if (excludesAge(key)) {
+        form.ownAgeKey = null;
+        form.partnerAgeKey = null;
+      }
+
+      if (!requiresPlotRole(key)) {
+        form.plotRole = null;
+      }
+
       renderAll();
     });
 
-    renderPillGroup(els.ownGenderPills, OWN_GENDERS, form.ownGender, (key) => { form.ownGender = key; renderAll(); });
-    renderPillGroup(els.partnerGenderPills, PARTNER_GENDERS, form.partnerGender, (key) => { form.partnerGender = key; renderAll(); });
-
-    renderPillGroup(els.ownAgePills, AGE_BUCKETS, form.ownAgeKey, (key) => { form.ownAgeKey = key; renderAll(); }, {
-      isDisabled: (b) => form.topic === 'flirt18' && !b.adult,
+    renderPillGroup(els.ownGenderPills, OWN_GENDERS, form.ownGender, (key) => {
+      form.ownGender = key;
+      if (requiresOppositeGender(form.topic)) {
+        const opp = oppositeGender(key);
+        form.partnerGender = opp || 'unspecified';
+      }
+      renderAll();
+    }, {
+      // На "Флирт"/"Ролка" нельзя оставить свой пол неопределённым — иначе
+      // невозможно вычислить противоположный.
+      isDisabled: (opt) => oppositeRequired && opt.key === 'unspecified',
     });
-    renderPillGroup(els.partnerAgePills, AGE_BUCKETS, form.partnerAgeKey, (key) => { form.partnerAgeKey = key; renderAll(); });
+
+    renderPillGroup(els.partnerGenderPills, PARTNER_GENDERS, form.partnerGender, (key) => {
+      form.partnerGender = key;
+      renderAll();
+    }, {
+      isDisabled: (opt) => oppositeRequired && opt.key !== requiredPartnerGender,
+    });
+
+    els.plotRoleGroup.classList.toggle('hidden', !plotRoleRequired);
+    if (plotRoleRequired) {
+      renderPillGroup(els.plotRolePills, PLOT_ROLES, form.plotRole, (key) => {
+        form.plotRole = key;
+        renderAll();
+      });
+    }
+
+    els.ageSection.classList.toggle('hidden', ageExcluded);
+    if (!ageExcluded) {
+      renderPillGroup(els.ownAgePills, AGE_BUCKETS, form.ownAgeKey, (key) => { form.ownAgeKey = key; renderAll(); }, {
+        isDisabled: (b) => form.topic === 'flirt18' && !b.adult,
+      });
+      renderPillGroup(els.partnerAgePills, AGE_BUCKETS, form.partnerAgeKey, (key) => { form.partnerAgeKey = key; renderAll(); }, {
+        isDisabled: (b) => form.topic === 'flirt18' && !b.adult,
+      });
+    }
 
     renderPillGroup(els.themePills, THEMES, form.theme, (key) => { form.theme = key; applyTheme(key); renderAll(); });
 
-    els.adultCheckRow.classList.toggle('hidden', form.topic !== 'flirt18');
-    els.adultCheck.checked = form.adultChecked;
-
     els.validationMsg.classList.add('hidden');
   }
-
-  els.adultCheck.onchange = () => { form.adultChecked = els.adultCheck.checked; };
 
   function validateForm() {
     if (form.topic === 'flirt18') {
       if (!form.ownAgeKey) return 'Укажите свой возраст, чтобы выбрать тему "Флирт 18+"';
       const b = bucketByKey(form.ownAgeKey);
       if (!b || !b.adult) return 'Тема "Флирт 18+" доступна только с 18 лет';
-      if (!form.adultChecked) return 'Подтвердите, что вам есть 18 лет';
     }
+
+    if (requiresOppositeGender(form.topic)) {
+      const opp = oppositeGender(form.ownGender);
+      if (!opp) return 'Укажите свой пол (М/Ж), чтобы выбрать эту тему';
+      if (form.partnerGender !== opp) return 'Для этой темы можно выбрать только противоположный пол';
+    }
+
+    if (requiresPlotRole(form.topic) && !form.plotRole) {
+      return 'Выберите критерий: "Ищу сюжет" или "Предлагаю сюжет"';
+    }
+
     return null;
   }
 
@@ -453,14 +675,23 @@
       const settings = await apiFetch('/settings');
       form.ownGender = settings.gender;
       form.partnerGender = settings.preferred_partner_gender;
+      form.plotRole = settings.preferred_plot_role || null;
       form.theme = settings.color_theme === 'light' ? 'light' : 'dark';
       form.topic = settings.preferred_topic || 'general';
-      form.adultChecked = !!settings.is_age_verified;
       const ownBucket = settings.age != null ? bucketByAge(settings.age) : null;
       form.ownAgeKey = ownBucket ? ownBucket.key : null;
       const partnerBucket = (settings.preferred_age_min != null && settings.preferred_age_max != null)
         ? bucketByRange(settings.preferred_age_min, settings.preferred_age_max) : null;
       form.partnerAgeKey = partnerBucket ? partnerBucket.key : null;
+
+      // task190826: публичная конфигурация (сейчас — только reCAPTCHA site key).
+      // Не критично для остального UI — если запрос упал, просто считаем
+      // капчу выключенной, ничего не блокируем.
+      try {
+        session.captchaConfig = await apiFetch('/config/public');
+      } catch (e) {
+        session.captchaConfig = { recaptcha_enabled: false, recaptcha_site_key: null };
+      }
 
       applyTheme(form.theme);
       renderAll();
@@ -524,6 +755,7 @@
         els.messages.innerHTML = '';
         els.chatRoomLabel.textContent = 'Собеседник найден';
         addMessage('Собеседник найден. Будьте вежливы!', 'system');
+        hideCaptchaWidget();
         showScreen('chat');
         break;
       case 'message':
@@ -535,10 +767,15 @@
       case 'partner_left':
         addMessage('Собеседник покинул чат', 'system');
         session.roomId = null;
+        hideCaptchaWidget();
         setTimeout(() => showScreen('settings'), 1200);
         break;
       case 'error':
-        addMessage('Ошибка: ' + data.payload.message, 'system');
+        if (data.payload.code === 'captcha_required') {
+          showCaptchaWidget();
+        } else {
+          addMessage('Ошибка: ' + data.payload.message, 'system');
+        }
         break;
     }
   }
@@ -551,26 +788,26 @@
     els.messages.scrollTop = els.messages.scrollHeight;
   }
 
+  // task190826: запрет копирования сообщений из истории переписки.
+  els.messages.addEventListener('copy', (e) => e.preventDefault());
+  els.messages.addEventListener('contextmenu', (e) => e.preventDefault());
+
   // ---------------------------------------------------------------------
   // Действия пользователя
   // ---------------------------------------------------------------------
   function currentSearchPayload() {
-    const partnerBucket = form.partnerAgeKey ? bucketByKey(form.partnerAgeKey) : null;
+    const ageExcluded = excludesAge(form.topic);
+    const partnerBucket = (!ageExcluded && form.partnerAgeKey) ? bucketByKey(form.partnerAgeKey) : null;
     return {
       topic: form.topic,
       partner_gender: form.partnerGender,
       partner_age_min: partnerBucket ? partnerBucket.min : null,
       partner_age_max: partnerBucket ? partnerBucket.max : null,
+      plot_role: requiresPlotRole(form.topic) ? form.plotRole : null,
     };
   }
 
-  async function saveSettingsAndSearch() {
-    const error = validateForm();
-    if (error) {
-      els.validationMsg.textContent = error;
-      els.validationMsg.classList.remove('hidden');
-      return;
-    }
+  async function startSearch() {
     els.startChatBtn.disabled = true;
     try {
       const ownBucket = form.ownAgeKey ? bucketByKey(form.ownAgeKey) : null;
@@ -580,11 +817,11 @@
         body: JSON.stringify({
           gender: form.ownGender,
           age: ownBucket ? ownBucket.min : null,
-          self_declared_adult: form.topic === 'flirt18' ? form.adultChecked : false,
           preferred_topic: search.topic,
           preferred_partner_gender: search.partner_gender,
           preferred_age_min: search.partner_age_min,
           preferred_age_max: search.partner_age_max,
+          preferred_plot_role: search.plot_role,
           color_theme: form.theme,
           is_18_plus_mode: form.topic === 'flirt18',
         }),
@@ -605,7 +842,43 @@
     }
   }
 
-  els.startChatBtn.onclick = saveSettingsAndSearch;
+  // ---------------------------------------------------------------------
+  // task190826: модальное окно с правилами по нажатию "Начать чат" —
+  // поиск стартует только после явного согласия.
+  // ---------------------------------------------------------------------
+  function openRulesModal() {
+    const rules = RULES[form.topic] || RULES.general;
+    els.rulesModalTitle.textContent = rules.title;
+
+    let html = '';
+    if (rules.intro) html += '<p>' + rules.intro + '</p>';
+    html += '<div class="rules-heading">Запрещено:</div><ul>';
+    rules.forbidden.forEach((item) => { html += '<li>' + item + '</li>'; });
+    html += '</ul>';
+    els.rulesModalBody.innerHTML = html;
+
+    els.rulesModal.classList.remove('hidden');
+  }
+
+  function closeRulesModal() {
+    els.rulesModal.classList.add('hidden');
+  }
+
+  els.startChatBtn.onclick = () => {
+    const error = validateForm();
+    if (error) {
+      els.validationMsg.textContent = error;
+      els.validationMsg.classList.remove('hidden');
+      return;
+    }
+    openRulesModal();
+  };
+
+  els.rulesCancelBtn.onclick = closeRulesModal;
+  els.rulesAcceptBtn.onclick = () => {
+    closeRulesModal();
+    startSearch();
+  };
 
   els.cancelSearchBtn.onclick = async () => {
     try { await apiFetch('/search/cancel', { method: 'POST' }); } catch (e) { /* noop */ }
@@ -615,6 +888,10 @@
   function sendMessage() {
     const content = els.messageInput.value.trim();
     if (!content || !session.roomId) return;
+    // task190826: если сервер попросит капчу (первые N сообщений при
+    // включённой RECAPTCHA_ENABLED), нам нужен текст, чтобы переотправить
+    // его вместе с токеном после решения виджета.
+    pendingCaptchaContent = content;
     sendWs('message', { room_id: session.roomId, content });
     addMessage(content, 'me');
     els.messageInput.value = '';
@@ -635,12 +912,14 @@
   els.stopBtn.onclick = () => {
     if (session.roomId) sendWs('leave', { room_id: session.roomId });
     session.roomId = null;
+    hideCaptchaWidget();
     showScreen('settings');
   };
 
   els.nextBtn.onclick = async () => {
     if (session.roomId) sendWs('leave', { room_id: session.roomId });
     session.roomId = null;
+    hideCaptchaWidget();
     els.searchingTitle.textContent = 'Ищём нового собеседника…';
     els.searchingSub.textContent = 'Обычно это занимает несколько секунд';
     showScreen('searching');
@@ -650,6 +929,94 @@
       showScreen('settings');
     }
   };
+
+  // ---------------------------------------------------------------------
+  // task190826: пикер эмодзи в поле ввода сообщения.
+  // ---------------------------------------------------------------------
+  EMOJIS.forEach((emoji) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = emoji;
+    btn.onclick = () => insertEmoji(emoji);
+    els.emojiPanel.appendChild(btn);
+  });
+
+  function insertEmoji(emoji) {
+    const input = els.messageInput;
+    const start = input.selectionStart != null ? input.selectionStart : input.value.length;
+    const end = input.selectionEnd != null ? input.selectionEnd : input.value.length;
+    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+    const cursor = start + emoji.length;
+    input.focus();
+    if (input.setSelectionRange) input.setSelectionRange(cursor, cursor);
+    els.emojiPanel.classList.add('hidden');
+  }
+
+  els.emojiBtn.onclick = (e) => {
+    e.stopPropagation();
+    els.emojiPanel.classList.toggle('hidden');
+  };
+  document.addEventListener('click', (e) => {
+    if (!els.emojiPanel.contains(e.target) && e.target !== els.emojiBtn) {
+      els.emojiPanel.classList.add('hidden');
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // task190826: простая антиспам-капча (Google reCAPTCHA) — виджет
+  // появляется только когда сервер явно попросил (`error{code:
+  // captcha_required}`), см. shared/ws-events.md.
+  // ---------------------------------------------------------------------
+  function ensureRecaptchaScriptLoaded(callback) {
+    if (window.grecaptcha && window.grecaptcha.render) { callback(); return; }
+    if (document.getElementById('recaptcha-api-script')) {
+      window.__onRecaptchaApiLoad = callback;
+      return;
+    }
+    window.__onRecaptchaApiLoad = callback;
+    const script = document.createElement('script');
+    script.id = 'recaptcha-api-script';
+    script.src = 'https://www.google.com/recaptcha/api.js?onload=__onRecaptchaApiLoad&render=explicit';
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+  }
+
+  function showCaptchaWidget() {
+    if (!session.captchaConfig || !session.captchaConfig.recaptcha_enabled || !session.captchaConfig.recaptcha_site_key) {
+      // Капча выключена на сервере — просто сообщаем об ошибке текстом,
+      // ничего рисовать не можем/не нужно.
+      addMessage('Сообщение не отправлено: требуется подтверждение (капча).', 'system');
+      return;
+    }
+    els.captchaWrap.classList.remove('hidden');
+    ensureRecaptchaScriptLoaded(() => {
+      if (captchaWidgetId === null && window.grecaptcha && window.grecaptcha.render) {
+        captchaWidgetId = window.grecaptcha.render(els.captchaWidget, {
+          sitekey: session.captchaConfig.recaptcha_site_key,
+          callback: onCaptchaSolved,
+        });
+      }
+    });
+  }
+
+  function hideCaptchaWidget() {
+    els.captchaWrap.classList.add('hidden');
+    pendingCaptchaContent = null;
+    if (captchaWidgetId !== null && window.grecaptcha && window.grecaptcha.reset) {
+      window.grecaptcha.reset(captchaWidgetId);
+    }
+  }
+
+  function onCaptchaSolved(token) {
+    if (!pendingCaptchaContent || !session.roomId) return;
+    sendWs('message', { room_id: session.roomId, content: pendingCaptchaContent, captcha_token: token });
+    pendingCaptchaContent = null;
+    els.captchaWrap.classList.add('hidden');
+    if (captchaWidgetId !== null && window.grecaptcha && window.grecaptcha.reset) {
+      window.grecaptcha.reset(captchaWidgetId);
+    }
+  }
 
   window.addEventListener('beforeunload', () => { session.wsShouldReconnect = false; });
 
