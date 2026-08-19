@@ -1,0 +1,105 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 12, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  position: relative;
+  background: #232936;
+  border-radius: 18px;
+  padding: 32px 28px 24px;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+  color: #e7e9ee;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.closeButton {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  background: transparent;
+  border: none;
+  color: #9aa1b0;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.closeButton:hover {
+  color: #e7e9ee;
+}
+
+.icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  border: 2px solid #6dd3f0;
+  color: #6dd3f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.title {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
+.description {
+  font-size: 14px;
+  color: #c4c8d4;
+  line-height: 1.5;
+  margin: 0 0 24px;
+}
+
+.actions {
+  display: flex;
+  gap: 14px;
+}
+
+.actionButton {
+  flex: 1;
+  padding: 12px;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 2px solid currentColor;
+  transition: background 0.15s ease;
+}
+
+.actionGreen {
+  color: #34d399;
+}
+
+.actionGreen:hover {
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.actionOrange {
+  color: #f5a742;
+}
+
+.actionOrange:hover {
+  background: rgba(245, 167, 66, 0.1);
+}
+
+.actionRed {
+  color: #ef5b5b;
+}
+
+.actionRed:hover {
+  background: rgba(239, 91, 91, 0.1);
+}
